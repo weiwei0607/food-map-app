@@ -251,6 +251,13 @@
 
 <div class="container">
 
+  <!-- Random Picker Banner -->
+  <div class="card" style="background:linear-gradient(135deg,#667eea,#764ba2);color:white;text-align:center;cursor:pointer;margin-bottom:16px;" onclick="openRandomPicker()">
+    <div style="font-size:2rem;margin-bottom:8px;">🎲</div>
+    <div style="font-size:1.2rem;font-weight:700;">今天吃什麼？</div>
+    <div style="font-size:0.85rem;opacity:0.9;margin-top:4px;">從你的美食地圖隨機抽選，避開踩雷店</div>
+  </div>
+
   <!-- Tabs -->
   <div class="tabs">
     <button class="tab active" onclick="switchTab('restaurants')">🏪 餐廳</button>
@@ -385,6 +392,116 @@ function loadDemo() {
     ]
   };
   save();
+}
+
+// ===== Random Picker =====
+let randomPickerCount = parseInt(localStorage.getItem('foodMap_randomCount') || '3');
+let lastRandomPick = null;
+
+function openRandomPicker() {
+  const restaurants = Object.values(data.restaurants);
+  if (restaurants.length === 0) {
+    alert('還沒有餐廳紀錄，先記錄幾家吧！');
+    return;
+  }
+
+  // Weighted random based on Food Map data
+  const weights = restaurants.map(r => {
+    const reviews = data.reviews.filter(v => v.restaurantId === r.id);
+    const avg = reviews.length > 0 ? reviews.reduce((s,v) => s+v.rating,0) / reviews.length : 3;
+    if (avg <= 2) return { r, weight: 0 }; // Exclude bad restaurants
+    if (avg >= 4) return { r, weight: 3 }; // Loved restaurants x3
+    return { r, weight: 1 };
+  }).filter(item => item.weight > 0);
+
+  if (weights.length === 0) {
+    alert('你的餐廳紀錄都是踩雷店，趕快去發掘新餐廳！');
+    return;
+  }
+
+  const totalWeight = weights.reduce((s, item) => s + item.weight, 0);
+  let random = Math.random() * totalWeight;
+  let selected = weights[0].r;
+  for (const item of weights) {
+    random -= item.weight;
+    if (random <= 0) { selected = item.r; break; }
+  }
+
+  lastRandomPick = selected;
+  showRandomResult(selected);
+}
+
+function showRandomResult(r) {
+  const reviews = data.reviews.filter(v => v.restaurantId === r.id);
+  const loved = reviews.filter(v => v.rating >= 4);
+  const disliked = reviews.filter(v => v.rating <= 2);
+  const warnings = reviews.filter(v => v.rating <= 2 && v.overallDishRating >= 4);
+
+  let html = `
+    <div style="text-align:center;padding:20px;">
+      <div style="font-size:3rem;margin-bottom:10px;">🎉</div>
+      <div style="font-size:1.4rem;font-weight:700;margin-bottom:6px;">${escapeHtml(r.name)}</div>
+      <div style="color:#888;font-size:0.9rem;margin-bottom:16px;">${escapeHtml(r.address || '')}</div>
+  `;
+
+  if (loved.length > 0) {
+    html += `<div style="background:#e8f5e9;border-radius:12px;padding:12px;margin-bottom:12px;text-align:left;">
+      <div style="color:#2e7d32;font-weight:600;margin-bottom:6px;">✅ 你的安全牌</div>
+      ${loved.map(v => `<div style="font-size:0.9rem;">👍 ${escapeHtml(v.dishName)} ${'⭐'.repeat(v.rating)}</div>`).join('')}
+    </div>`;
+  }
+
+  if (warnings.length > 0) {
+    html += `<div style="background:#fff8e6;border-radius:12px;padding:12px;margin-bottom:12px;text-align:left;">
+      <div style="color:#a07000;font-weight:600;margin-bottom:6px;">⚠️ 踩雷提醒</div>
+      ${warnings.map(v => `<div style="font-size:0.9rem;">你喜歡 ${escapeHtml(v.dishName)}，但這家的你說「${escapeHtml(v.note)}」</div>`).join('')}
+    </div>`;
+  }
+
+  html += `
+      <div style="display:flex;gap:10px;margin-top:16px;">
+        <a href="https://www.google.com/maps/dir/?api=1&destination=${r.lat || ''},${r.lng || ''}" target="_blank"
+           style="flex:1;padding:12px;background:#4285f4;color:white;border-radius:12px;text-decoration:none;font-weight:600;">🧭 導航去這裡</a>
+      </div>
+  `;
+
+  if (randomPickerCount > 0) {
+    html += `
+      <button onclick="rerandomPick()" style="margin-top:12px;padding:10px 20px;background:#f5f5f5;border:none;border-radius:10px;cursor:pointer;font-weight:600;">
+        🔄 重抽（還有 ${randomPickerCount} 次）
+      </button>
+    `;
+  } else {
+    html += `
+      <div style="margin-top:12px;font-size:0.85rem;color:#888;">
+        免費重抽次數已用完<br>
+        <button onclick="alert('升級解鎖無限重抽！')" style="margin-top:6px;padding:8px 16px;background:linear-gradient(135deg,var(--accent),#d4a373);color:white;border:none;border-radius:10px;cursor:pointer;font-weight:600;">
+          💎 升級無限重抽
+        </button>
+      </div>
+    `;
+  }
+
+  html += `</div>`;
+
+  const modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:300;padding:20px;';
+  modal.innerHTML = `<div style="background:white;border-radius:24px;max-width:400px;width:100%;max-height:80vh;overflow-y:auto;position:relative;">
+    <button onclick="this.closest('.random-modal').remove()" style="position:absolute;top:16px;right:16px;background:none;border:none;font-size:1.5rem;cursor:pointer;">✕</button>
+    ${html}
+  </div>`;
+  modal.className = 'random-modal';
+  modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+  document.body.appendChild(modal);
+}
+
+function rerandomPick() {
+  if (randomPickerCount > 0) {
+    randomPickerCount--;
+    localStorage.setItem('foodMap_randomCount', randomPickerCount.toString());
+    document.querySelector('.random-modal')?.remove();
+    openRandomPicker();
+  }
 }
 
 function load() {
