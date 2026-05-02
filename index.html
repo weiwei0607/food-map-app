@@ -255,7 +255,7 @@
   <div class="card" style="background:linear-gradient(135deg,#667eea,#764ba2);color:white;text-align:center;cursor:pointer;margin-bottom:16px;" onclick="openRandomPicker()">
     <div style="font-size:2rem;margin-bottom:8px;">🎲</div>
     <div style="font-size:1.2rem;font-weight:700;">今天吃什麼？</div>
-    <div style="font-size:0.85rem;opacity:0.9;margin-top:4px;">從你的美食地圖隨機抽選，避開踩雷店</div>
+    <div style="font-size:0.85rem;opacity:0.9;margin-top:4px;">搜尋附近 1km 真實餐廳，結合你的愛店/踩雷記錄推薦</div>
   </div>
 
   <!-- Tabs -->
@@ -398,24 +398,101 @@ function loadDemo() {
 let randomPickerCount = parseInt(localStorage.getItem('foodMap_randomCount') || '3');
 let lastRandomPick = null;
 
-function openRandomPicker() {
+async function openRandomPicker() {
+  // Try to get GPS and search nearby restaurants first
+  if (navigator.geolocation && typeof google !== 'undefined' && google.maps && google.maps.places) {
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        const nearby = await searchNearbyRestaurants(lat, lng);
+        if (nearby.length > 0) {
+          pickFromRestaurants(nearby);
+        } else {
+          pickFromSavedRestaurants();
+        }
+      },
+      () => {
+        // GPS failed, fallback to saved restaurants
+        pickFromSavedRestaurants();
+      }
+    );
+  } else {
+    pickFromSavedRestaurants();
+  }
+}
+
+function searchNearbyRestaurants(lat, lng) {
+  return new Promise((resolve) => {
+    const service = new google.maps.places.PlacesService(document.createElement('div'));
+    service.nearbySearch({
+      location: { lat, lng },
+      radius: 1000, // 1km
+      type: 'restaurant',
+      language: 'zh-TW'
+    }, (results, status) => {
+      if (status === google.maps.places.PlacesServiceStatus.OK && results) {
+        const mapped = results.map(p => {
+          // Check if this place is already in our data
+          const existing = Object.values(data.restaurants).find(r =>
+            r.placeId === p.place_id || r.name === p.name
+          );
+          if (existing) {
+            return { ...existing, isNew: false };
+          }
+          return {
+            id: 'gp_' + p.place_id,
+            name: p.name,
+            address: p.vicinity,
+            lat: p.geometry.location.lat(),
+            lng: p.geometry.location.lng(),
+            placeId: p.place_id,
+            rating: p.rating || 0,
+            userRatingsTotal: p.user_ratings_total || 0,
+            priceLevel: p.price_level || 0,
+            photoUrl: p.photos && p.photos[0] ? p.photos[0].getUrl({ maxWidth: 400 }) : null,
+            isNew: true
+          };
+        });
+        resolve(mapped);
+      } else {
+        resolve([]);
+      }
+    });
+  });
+}
+
+function pickFromSavedRestaurants() {
   const restaurants = Object.values(data.restaurants);
   if (restaurants.length === 0) {
     alert('還沒有餐廳紀錄，先記錄幾家吧！');
     return;
   }
+  doWeightedPick(restaurants);
+}
 
-  // Weighted random based on Food Map data
+function pickFromRestaurants(restaurants) {
+  if (restaurants.length === 0) {
+    pickFromSavedRestaurants();
+    return;
+  }
+  doWeightedPick(restaurants);
+}
+
+function doWeightedPick(restaurants) {
   const weights = restaurants.map(r => {
     const reviews = data.reviews.filter(v => v.restaurantId === r.id);
     const avg = reviews.length > 0 ? reviews.reduce((s,v) => s+v.rating,0) / reviews.length : 3;
-    if (avg <= 2) return { r, weight: 0 }; // Exclude bad restaurants
-    if (avg >= 4) return { r, weight: 3 }; // Loved restaurants x3
+    if (avg <= 2) return { r, weight: 0 };
+    if (avg >= 4) return { r, weight: 3 };
     return { r, weight: 1 };
   }).filter(item => item.weight > 0);
 
   if (weights.length === 0) {
-    alert('你的餐廳紀錄都是踩雷店，趕快去發掘新餐廳！');
+    // All are bad or neutral, pick randomly from all
+    const randomR = restaurants[Math.floor(Math.random() * restaurants.length)];
+    lastRandomPick = randomR;
+    showRandomResult(randomR);
     return;
   }
 
@@ -436,13 +513,37 @@ function showRandomResult(r) {
   const loved = reviews.filter(v => v.rating >= 4);
   const disliked = reviews.filter(v => v.rating <= 2);
   const warnings = reviews.filter(v => v.rating <= 2 && v.overallDishRating >= 4);
+  const isNewDiscovery = r.isNew;
 
-  let html = `
-    <div style="text-align:center;padding:20px;">
-      <div style="font-size:3rem;margin-bottom:10px;">🎉</div>
-      <div style="font-size:1.4rem;font-weight:700;margin-bottom:6px;">${escapeHtml(r.name)}</div>
-      <div style="color:#888;font-size:0.9rem;margin-bottom:16px;">${escapeHtml(r.address || '')}</div>
+  let html = `<div style="text-align:center;padding:20px;">`;
+
+  // Photo if available
+  if (r.photoUrl) {
+    html += `<img src="${r.photoUrl}" style="width:100%;height:180px;object-fit:cover;border-radius:16px;margin-bottom:12px;" alt="${escapeHtml(r.name)}">`;
+  } else {
+    html += `<div style="font-size:3rem;margin-bottom:10px;">🎉</div>`;
+  }
+
+  // New discovery badge
+  if (isNewDiscovery) {
+    html += `<div style="display:inline-block;padding:4px 12px;background:linear-gradient(135deg,#667eea,#764ba2);color:white;border-radius:20px;font-size:0.8rem;font-weight:600;margin-bottom:8px;">🆕 新發現！你還沒記錄過</div>`;
+  }
+
+  html += `
+    <div style="font-size:1.4rem;font-weight:700;margin-bottom:6px;">${escapeHtml(r.name)}</div>
+    <div style="color:#888;font-size:0.9rem;margin-bottom:8px;">${escapeHtml(r.address || '')}</div>
   `;
+
+  // Google rating
+  if (r.rating > 0) {
+    html += `<div style="font-size:0.85rem;color:#888;margin-bottom:12px;">Google 評價：${'⭐'.repeat(Math.round(r.rating))} ${r.rating}（${r.userRatingsTotal || 0} 則評論）</div>`;
+  }
+
+  // Price level
+  if (r.priceLevel > 0) {
+    const priceText = '$'.repeat(r.priceLevel);
+    html += `<div style="font-size:0.85rem;color:#888;margin-bottom:12px;">價位：${priceText}</div>`;
+  }
 
   if (loved.length > 0) {
     html += `<div style="background:#e8f5e9;border-radius:12px;padding:12px;margin-bottom:12px;text-align:left;">
@@ -458,8 +559,13 @@ function showRandomResult(r) {
     </div>`;
   }
 
+  // Quick add button for new discoveries
+  if (isNewDiscovery) {
+    html += `<button onclick="addNewRestaurantToMap('${r.id}')" style="margin-bottom:12px;padding:8px 16px;background:#e8f5e9;color:#2e7d32;border:none;border-radius:10px;cursor:pointer;font-weight:600;font-size:0.9rem;">＋ 加入我的美食地圖</button>`;
+  }
+
   html += `
-      <div style="display:flex;gap:10px;margin-top:16px;">
+      <div style="display:flex;gap:10px;margin-top:8px;">
         <a href="https://www.google.com/maps/dir/?api=1&destination=${r.lat || ''},${r.lng || ''}" target="_blank"
            style="flex:1;padding:12px;background:#4285f4;color:white;border-radius:12px;text-decoration:none;font-weight:600;">🧭 導航去這裡</a>
       </div>
@@ -493,6 +599,29 @@ function showRandomResult(r) {
   modal.className = 'random-modal';
   modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
   document.body.appendChild(modal);
+}
+
+function addNewRestaurantToMap(gpId) {
+  const gpRestaurant = lastRandomPick;
+  if (!gpRestaurant || !gpRestaurant.isNew) return;
+
+  // Convert Google Places restaurant to Food Map format
+  const newRestaurant = {
+    id: gpId.replace('gp_', 'r_'),
+    name: gpRestaurant.name,
+    address: gpRestaurant.address,
+    lat: gpRestaurant.lat,
+    lng: gpRestaurant.lng,
+    placeId: gpRestaurant.placeId
+  };
+
+  data.restaurants[newRestaurant.id] = newRestaurant;
+  save();
+  alert(`「${gpRestaurant.name}」已加入你的美食地圖！`);
+
+  // Close modal and refresh
+  document.querySelector('.random-modal')?.remove();
+  render();
 }
 
 function rerandomPick() {
