@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>我的美食地圖 | Restaurant Tracker</title>
+<style>
+  :root {
+    --bg: #faf8f5;
+    --card: #ffffff;
+    --text: #2d2d2d;
+    --muted: #888;
+    --accent: #e07a5f;
+    --accent2: #81b29a;
+    --danger: #e07a5f;
+    --success: #81b29a;
+    --warn: #f2cc8f;
+    --star: #f2cc8f;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans TC", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding-bottom: 100px;
+  }
+  header {
+    background: linear-gradient(135deg, var(--accent), #d4a373);
+    color: white;
+    padding: 40px 20px 30px;
+    text-align: center;
+    position: relative;
+  }
+  header h1 { font-size: 1.7rem; margin-bottom: 6px; }
+  header p { opacity: 0.9; font-size: 0.9rem; }
+  .nav { text-align: center; margin: 14px; }
+  .nav a {
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 0.85rem;
+    padding: 5px 12px;
+    border: 1px solid var(--accent);
+    border-radius: 20px;
+    display: inline-block;
+  }
+
+  .stats-bar {
+    display: flex;
+    justify-content: center;
+    gap: 24px;
+    margin-top: 16px;
+  }
+  .stat {
+    text-align: center;
+  }
+  .stat-num {
+    font-size: 1.5rem;
+    font-weight: 700;
+  }
+  .stat-label {
+    font-size: 0.75rem;
+    opacity: 0.8;
+  }
+
+  .container { max-width: 720px; margin: 0 auto; padding: 20px; }
+
+  /* 搜尋 */
+  .search-bar {
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+    padding: 12px 0;
+    z-index: 10;
+    display: flex;
+    gap: 10px;
+  }
+  .search-bar input {
+    flex: 1;
+    padding: 12px 16px;
+    border: 1.5px solid #e8e8e8;
+    border-radius: 14px;
+    font-size: 1rem;
+    background: white;
+  }
+  .search-bar input:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .filter-btn {
+    padding: 12px 16px;
+    border: 1.5px solid #e8e8e8;
+    border-radius: 14px;
+    background: white;
+    cursor: pointer;
+    font-size: 0.9rem;
+    white-space: nowrap;
+  }
+  .filter-btn.active {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+  }
+
+  /* 餐廳卡片 */
+  .restaurant-card {
+    background: var(--card);
+    border-radius: 18px;
+    padding: 20px;
+    margin-bottom: 16px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.05);
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+  }
+  .restaurant-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.08);
+  }
+  .restaurant-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+  }
+  .restaurant-icon {
+    width: 52px; height: 52px;
+    border-radius: 14px;
+    background: linear-gradient(135deg, #ffe8e0, #fff0f0);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.6rem;
+    flex-shrink: 0;
+  }
+  .restaurant-info { flex: 1; }
+  .restaurant-name {
+    font-size: 1.15rem;
+    font-weight: 700;
+    margin-bottom: 2px;
+  }
+  .restaurant-meta {
+    font-size: 0.8rem;
+    color: var(--muted);
+  }
+  .stars {
+    color: var(--star);
+    font-size: 0.9rem;
+    margin-top: 4px;
+  }
+  .dish-preview {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+    flex-wrap: wrap;
+  }
+  .dish-chip {
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 0.8rem;
+  }
+  .dish-chip.like {
+    background: #e8f5e9;
+    color: #2e7d32;
+  }
+  .dish-chip.dislike {
+    background: #fff0f0;
+    color: #c62828;
+  }
+  .dish-chip.more {
+    background: #f5f5f5;
+    color: #888;
+  }
+
+  /* 展開內容 */
+  .restaurant-detail {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid #f0f0f0;
+    display: none;
+  }
+  .restaurant-detail.open { display: block; }
+
+  .dish-section {
+    margin-bottom: 16px;
+  }
+  .dish-section-title {
+    font-size: 0.85rem;
+    font-weight: 700;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .dish-section-title.like { color: var(--success); }
+  .dish-section-title.dislike { color: var(--danger); }
+  .dish-input-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .dish-input-row input {
+    flex: 1;
+    padding: 10px 12px;
+    border: 1.5px solid #e8e8e8;
+    border-radius: 10px;
+    font-size: 0.9rem;
+  }
+  .dish-input-row button {
+    padding: 10px 14px;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+  .dish-input-row button.like-btn { background: var(--success); color: white; }
+  .dish-input-row button.dislike-btn { background: var(--danger); color: white; }
+
+  .dish-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .dish-tag {
+    padding: 6px 12px;
+    border-radius: 14px;
+    font-size: 0.85rem;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .dish-tag.like {
+    background: #e8f5e9;
+    color: #2e7d32;
+  }
+  .dish-tag.dislike {
+    background: #fff0f0;
+    color: #c62828;
+  }
+  .dish-tag .remove {
+    cursor: pointer;
+    opacity: 0.5;
+    font-size: 0.75rem;
+  }
+  .dish-tag .remove:hover { opacity: 1; }
+
+  .note-area {
+    margin-top: 12px;
+  }
+  .note-area textarea {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1.5px solid #e8e8e8;
+    border-radius: 10px;
+    font-size: 0.9rem;
+    resize: vertical;
+    min-height: 60px;
+    font-family: inherit;
+  }
+  .note-area textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+
+  .card-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 16px;
+  }
+  .card-actions button {
+    flex: 1;
+    padding: 10px;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+  .btn-save { background: var(--accent); color: white; }
+  .btn-delete { background: #f5f5f5; color: #888; }
+
+  /* 新增按鈕 */
+  .fab {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    width: 60px; height: 60px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent), #d4a373);
+    color: white;
+    border: none;
+    font-size: 1.8rem;
+    cursor: pointer;
+    box-shadow: 0 4px 16px rgba(224,122,95,0.4);
+    transition: transform 0.15s;
+    z-index: 100;
+  }
+  .fab:active { transform: scale(0.92); }
+
+  /* Modal */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.4);
+    display: none;
+    align-items: flex-end;
+    justify-content: center;
+    z-index: 200;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: white;
+    width: 100%;
+    max-width: 520px;
+    border-radius: 24px 24px 0 0;
+    padding: 28px 24px 40px;
+    animation: slideUp 0.25s ease;
+  }
+  @keyframes slideUp {
+    from { transform: translateY(100%); }
+    to { transform: translateY(0); }
+  }
+  .modal h2 {
+    font-size: 1.2rem;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .modal input, .modal select {
+    width: 100%;
+    padding: 14px 16px;
+    border: 1.5px solid #e8e8e8;
+    border-radius: 12px;
+    font-size: 1rem;
+    margin-bottom: 14px;
+  }
+  .modal input:focus, .modal select:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .star-rating {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 20px;
+    font-size: 1.8rem;
+    cursor: pointer;
+  }
+  .star-rating .star { color: #ddd; transition: color 0.15s; }
+  .star-rating .star.active { color: var(--star); }
+
+  .modal-actions {
+    display: flex;
+    gap: 10px;
+  }
+  .modal-actions button {
+    flex: 1;
+    padding: 14px;
+    border: none;
+    border-radius: 12px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .btn-confirm { background: var(--accent); color: white; }
+  .btn-cancel { background: #f5f5f5; color: #666; }
+
+  .empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--muted);
+  }
+  .empty-state .icon { font-size: 3.5rem; margin-bottom: 16px; }
+  .empty-state h3 { margin-bottom: 8px; color: var(--text); }
+
+  @media (max-width: 480px) {
+    header h1 { font-size: 1.4rem; }
+    .stats-bar { gap: 16px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🍽️ 我的美食地圖</h1>
+  <p>記錄每間餐廳的愛與恨，下次不再踩雷</p>
+  <div class="stats-bar">
+    <div class="stat">
+      <div class="stat-num" id="statRestaurants">0</div>
+      <div class="stat-label">間餐廳</div>
+    </div>
+    <div class="stat">
+      <div class="stat-num" id="statLikes">0</div>
+      <div class="stat-label">道愛吃</div>
+    </div>
+    <div class="stat">
+      <div class="stat-num" id="statDislikes">0</div>
+      <div class="stat-label">道討厭</div>
+    </div>
+  </div>
+</header>
+
+<div class="nav">
+</div>
+
+<div class="container">
+
+  <div class="search-bar">
+    <input type="text" id="searchInput" placeholder="🔍 搜尋餐廳或菜名..." oninput="render()">
+    <button class="filter-btn active" id="filterAll" onclick="setFilter('all')">全部</button>
+    <button class="filter-btn" id="filterLove" onclick="setFilter('love')">愛店</button>
+  </div>
+
+  <div id="restaurantList"></div>
+
+</div>
+
+<!-- 新增按鈕 -->
+<button class="fab" onclick="openModal()">＋</button>
+
+<!-- 新增/編輯 Modal -->
+<div class="modal-overlay" id="modal" onclick="closeModalOnBg(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <h2>🍴 新增餐廳</h2>
+    <input type="text" id="modalName" placeholder="餐廳名稱">
+    <input type="text" id="modalType" placeholder="類型，例如：日式、火鍋、早午餐">
+    <input type="text" id="modalLocation" placeholder="地址或地區">
+    <p style="font-size:0.85rem;color:var(--muted);margin-bottom:8px;">評分</p>
+    <div class="star-rating" id="starRating">
+      <span class="star" onclick="setRating(1)">★</span>
+      <span class="star" onclick="setRating(2)">★</span>
+      <span class="star" onclick="setRating(3)">★</span>
+      <span class="star" onclick="setRating(4)">★</span>
+      <span class="star" onclick="setRating(5)">★</span>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModal()">取消</button>
+      <button class="btn-confirm" onclick="saveRestaurant()">儲存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const STORAGE_KEY = 'restaurantTracker_v1';
+let restaurants = [];
+let editingId = null;
+let currentRating = 0;
+let filterMode = 'all';
+
+// 載入資料
+function load() {
+  const data = localStorage.getItem(STORAGE_KEY);
+  if (data) {
+    try { restaurants = JSON.parse(data); } catch(e) {}
+  }
+  render();
+}
+
+function save() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(restaurants));
+}
+
+// 統計
+function updateStats() {
+  const total = restaurants.length;
+  const likes = restaurants.reduce((sum, r) => sum + (r.likes?.length || 0), 0);
+  const dislikes = restaurants.reduce((sum, r) => sum + (r.dislikes?.length || 0), 0);
+  document.getElementById('statRestaurants').textContent = total;
+  document.getElementById('statLikes').textContent = likes;
+  document.getElementById('statDislikes').textContent = dislikes;
+}
+
+// 渲染列表
+function render() {
+  updateStats();
+  const list = document.getElementById('restaurantList');
+  const query = document.getElementById('searchInput').value.trim().toLowerCase();
+
+  let filtered = restaurants.filter(r => {
+    if (filterMode === 'love' && r.rating < 4) return false;
+    if (!query) return true;
+    const text = [r.name, r.type, r.location, ...(r.likes || []), ...(r.dislikes || [])].join(' ').toLowerCase();
+    return text.includes(query);
+  });
+
+  // 排序：評分高的在前
+  filtered.sort((a, b) => b.rating - a.rating);
+
+  if (filtered.length === 0) {
+    list.innerHTML = `
+      <div class="empty-state">
+        <div class="icon">🍽️</div>
+        <h3>還沒有餐廳紀錄</h3>
+        <p>點右下角按鈕新增你的第一家愛店！</p>
+      </div>`;
+    return;
+  }
+
+  list.innerHTML = filtered.map(r => {
+    const likes = r.likes || [];
+    const dislikes = r.dislikes || [];
+    const showLikes = likes.slice(0, 3);
+    const showDislikes = dislikes.slice(0, 2);
+    const extraLikes = likes.length > 3 ? likes.length - 3 : 0;
+    const extraDislikes = dislikes.length > 2 ? dislikes.length - 2 : 0;
+
+    const stars = '★'.repeat(r.rating || 0) + '☆'.repeat(5 - (r.rating || 0));
+
+    return `
+      <div class="restaurant-card" data-id="${r.id}">
+        <div class="restaurant-header" onclick="toggleDetail('${r.id}')">
+          <div class="restaurant-icon">${getIcon(r.type)}</div>
+          <div class="restaurant-info">
+            <div class="restaurant-name">${escapeHtml(r.name)} ${r.rating >= 4 ? '❤️' : ''}</div>
+            <div class="restaurant-meta">${escapeHtml(r.type || '')} · ${escapeHtml(r.location || '')}</div>
+            <div class="stars">${stars}</div>
+          </div>
+        </div>
+        <div class="dish-preview" onclick="toggleDetail('${r.id}')">
+          ${showLikes.map(d => `<span class="dish-chip like">👍 ${escapeHtml(d)}</span>`).join('')}
+          ${extraLikes > 0 ? `<span class="dish-chip more">+${extraLikes}</span>` : ''}
+          ${showDislikes.map(d => `<span class="dish-chip dislike">👎 ${escapeHtml(d)}</span>`).join('')}
+          ${extraDislikes > 0 ? `<span class="dish-chip more">+${extraDislikes}</span>` : ''}
+        </div>
+
+        <div class="restaurant-detail" id="detail-${r.id}">
+          <div class="dish-section">
+            <div class="dish-section-title like">👍 喜歡吃的菜</div>
+            <div class="dish-input-row">
+              <input type="text" placeholder="輸入菜名..." id="likeInput-${r.id}" onkeydown="if(event.key==='Enter')addDish('${r.id}','like')">
+              <button class="like-btn" onclick="addDish('${r.id}','like')">新增</button>
+            </div>
+            <div class="dish-list" id="likes-${r.id}">
+              ${likes.map(d => dishTag(d, 'like', r.id)).join('')}
+            </div>
+          </div>
+
+          <div class="dish-section">
+            <div class="dish-section-title dislike">👎 討厭吃的菜</div>
+            <div class="dish-input-row">
+              <input type="text" placeholder="輸入菜名..." id="dislikeInput-${r.id}" onkeydown="if(event.key==='Enter')addDish('${r.id}','dislike')">
+              <button class="dislike-btn" onclick="addDish('${r.id}','dislike')">新增</button>
+            </div>
+            <div class="dish-list" id="dislikes-${r.id}">
+              ${dislikes.map(d => dishTag(d, 'dislike', r.id)).join('')}
+            </div>
+          </div>
+
+          <div class="note-area">
+            <textarea placeholder="備註：停車方便嗎？需要訂位嗎？人均多少？" id="note-${r.id}" onchange="updateNote('${r.id}')">${escapeHtml(r.note || '')}</textarea>
+          </div>
+
+          <div class="card-actions">
+            <button class="btn-save" onclick="closeDetail('${r.id}')">完成</button>
+            <button class="btn-delete" onclick="deleteRestaurant('${r.id}')">🗑️ 刪除</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function dishTag(name, type, rid) {
+  return `
+    <span class="dish-tag ${type}">
+      ${escapeHtml(name)}
+      <span class="remove" onclick="removeDish('${rid}','${type}','${escapeHtml(name).replace(/'/g, "\\'")}')">✕</span>
+    </span>
+  `;
+}
+
+function getIcon(type) {
+  const map = {
+    '日式': '🍣', '壽司': '🍣', '拉麵': '🍜', '燒肉': '🥩',
+    '火鍋': '🍲', '麻辣': '🌶️', '早午餐': '🍳', '早餐': '🍳',
+    '義式': '🍝', '披薩': '🍕', '漢堡': '🍔', '美式': '🍔',
+    '甜點': '🍰', '咖啡': '☕', '飲料': '🧋', '手搖': '🧋',
+    '泰式': '🥘', '韓式': '🍱', '中餐': '🥟', '台菜': '🍚',
+    '海鮮': '🦐', '燒烤': '🍖', '牛排': '🥩', '酒吧': '🍸',
+  };
+  for (const [k, v] of Object.entries(map)) {
+    if (type && type.includes(k)) return v;
+  }
+  return '🍽️';
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function toggleDetail(id) {
+  const detail = document.getElementById(`detail-${id}`);
+  detail.classList.toggle('open');
+}
+
+function closeDetail(id) {
+  document.getElementById(`detail-${id}`).classList.remove('open');
+}
+
+// 新增/編輯 Modal
+function openModal(id) {
+  editingId = id || null;
+  currentRating = 0;
+  document.getElementById('modalName').value = '';
+  document.getElementById('modalType').value = '';
+  document.getElementById('modalLocation').value = '';
+  updateStarDisplay();
+  document.querySelector('.modal h2').textContent = id ? '✏️ 編輯餐廳' : '🍴 新增餐廳';
+
+  if (id) {
+    const r = restaurants.find(x => x.id === id);
+    if (r) {
+      document.getElementById('modalName').value = r.name;
+      document.getElementById('modalType').value = r.type || '';
+      document.getElementById('modalLocation').value = r.location || '';
+      currentRating = r.rating || 0;
+      updateStarDisplay();
+    }
+  }
+
+  document.getElementById('modal').classList.add('open');
+}
+
+function closeModal() {
+  document.getElementById('modal').classList.remove('open');
+  editingId = null;
+}
+
+function closeModalOnBg(e) {
+  if (e.target.id === 'modal') closeModal();
+}
+
+function setRating(n) {
+  currentRating = n;
+  updateStarDisplay();
+}
+
+function updateStarDisplay() {
+  const stars = document.querySelectorAll('#starRating .star');
+  stars.forEach((s, i) => s.classList.toggle('active', i < currentRating));
+}
+
+function saveRestaurant() {
+  const name = document.getElementById('modalName').value.trim();
+  const type = document.getElementById('modalType').value.trim();
+  const location = document.getElementById('modalLocation').value.trim();
+
+  if (!name) { alert('請輸入餐廳名稱'); return; }
+
+  if (editingId) {
+    const r = restaurants.find(x => x.id === editingId);
+    if (r) {
+      r.name = name;
+      r.type = type;
+      r.location = location;
+      r.rating = currentRating;
+    }
+  } else {
+    restaurants.push({
+      id: Date.now().toString(),
+      name,
+      type,
+      location,
+      rating: currentRating,
+      likes: [],
+      dislikes: [],
+      note: '',
+    });
+  }
+
+  save();
+  render();
+  closeModal();
+}
+
+function deleteRestaurant(id) {
+  if (!confirm('確定要刪除這間餐廳嗎？')) return;
+  restaurants = restaurants.filter(r => r.id !== id);
+  save();
+  render();
+}
+
+// 菜色管理
+function addDish(id, type) {
+  const input = document.getElementById(`${type}Input-${id}`);
+  const name = input.value.trim();
+  if (!name) return;
+
+  const r = restaurants.find(x => x.id === id);
+  if (!r) return;
+
+  const list = type === 'like' ? (r.likes = r.likes || []) : (r.dislikes = r.dislikes || []);
+  if (!list.includes(name)) list.push(name);
+
+  input.value = '';
+  save();
+  render();
+  // 重新展開
+  setTimeout(() => {
+    const detail = document.getElementById(`detail-${id}`);
+    if (detail) detail.classList.add('open');
+  }, 10);
+}
+
+function removeDish(rid, type, name) {
+  const r = restaurants.find(x => x.id === rid);
+  if (!r) return;
+  const list = type === 'like' ? r.likes : r.dislikes;
+  const idx = list.indexOf(name);
+  if (idx > -1) list.splice(idx, 1);
+  save();
+  render();
+  setTimeout(() => {
+    const detail = document.getElementById(`detail-${rid}`);
+    if (detail) detail.classList.add('open');
+  }, 10);
+}
+
+function updateNote(id) {
+  const r = restaurants.find(x => x.id === id);
+  if (r) {
+    r.note = document.getElementById(`note-${id}`).value;
+    save();
+  }
+}
+
+// 篩選
+function setFilter(mode) {
+  filterMode = mode;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById(mode === 'all' ? 'filterAll' : 'filterLove').classList.add('active');
+  render();
+}
+
+// 初始化
+load();
+</script>
+
+</body>
+</html>
