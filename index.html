@@ -397,6 +397,24 @@ function loadDemo() {
 // ===== Random Picker =====
 let randomPickerCount = parseInt(localStorage.getItem('foodMap_randomCount') || '3');
 let lastRandomPick = null;
+let filters = JSON.parse(localStorage.getItem('foodMap_filters') || '{}');
+const isPremium = false; // TODO: connect to payment
+
+function getFilters() {
+  return {
+    noSpicy: isPremium ? (filters.noSpicy || false) : false,
+    minGoogleRating: isPremium ? (filters.minGoogleRating || 0) : 0,
+    maxPriceLevel: isPremium ? (filters.maxPriceLevel || 0) : 0,
+    onlyLoved: isPremium ? (filters.onlyLoved || false) : false,
+    excludeBad: isPremium ? (filters.excludeBad !== false) : true,
+    distance: filters.distance || 1000, // free users can change distance
+    ...filters
+  };
+}
+
+function saveFilters() {
+  localStorage.setItem('foodMap_filters', JSON.stringify(filters));
+}
 
 async function openRandomPicker() {
   // Try to get GPS and search nearby restaurants first
@@ -424,10 +442,11 @@ async function openRandomPicker() {
 
 function searchNearbyRestaurants(lat, lng) {
   return new Promise((resolve) => {
+    const f = getFilters();
     const service = new google.maps.places.PlacesService(document.createElement('div'));
     service.nearbySearch({
       location: { lat, lng },
-      radius: 1000, // 1km
+      radius: f.distance, // use filter distance
       type: 'restaurant',
       language: 'zh-TW'
     }, (results, status) => {
@@ -479,8 +498,64 @@ function pickFromRestaurants(restaurants) {
   doWeightedPick(restaurants);
 }
 
+function applyFiltersToRestaurants(restaurants) {
+  const f = getFilters();
+  return restaurants.filter(r => {
+    // Exclude bad restaurants
+    if (f.excludeBad) {
+      const reviews = data.reviews.filter(v => v.restaurantId === r.id);
+      if (reviews.length > 0) {
+        const avg = reviews.reduce((s,v) => s+v.rating,0) / reviews.length;
+        if (avg <= 2) return false;
+      }
+    }
+
+    // Only loved restaurants
+    if (f.onlyLoved) {
+      const reviews = data.reviews.filter(v => v.restaurantId === r.id);
+      if (reviews.length === 0) return false;
+      const avg = reviews.reduce((s,v) => s+v.rating,0) / reviews.length;
+      if (avg < 4) return false;
+    }
+
+    // Min Google rating
+    if (f.minGoogleRating > 0 && r.rating > 0 && r.rating < f.minGoogleRating) return false;
+
+    // Max price level
+    if (f.maxPriceLevel > 0 && r.priceLevel > 0 && r.priceLevel > f.maxPriceLevel) return false;
+
+    // No spicy (simple keyword check on name/tags if available)
+    if (f.noSpicy) {
+      const spicyKeywords = ['辣', '麻辣', '酸辣', 'spicy', 'hot pot'];
+      const text = (r.name + ' ' + (r.tags || []).join(' ')).toLowerCase();
+      if (spicyKeywords.some(k => text.includes(k))) return false;
+    }
+
+    return true;
+  });
+}
+
 function doWeightedPick(restaurants) {
-  const weights = restaurants.map(r => {
+  // Apply filters first
+  const filtered = applyFiltersToRestaurants(restaurants);
+
+  if (filtered.length === 0) {
+    // No restaurants match filters
+    const modal = document.createElement('div');
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:300;padding:20px;';
+    modal.innerHTML = `<div style="background:white;border-radius:24px;max-width:400px;width:100%;padding:28px;text-align:center;">
+      <div style="font-size:3rem;margin-bottom:12px;">😕</div>
+      <div style="font-weight:700;margin-bottom:8px;">沒有符合條件的餐廳</div>
+      <div style="color:#888;font-size:0.9rem;margin-bottom:16px;">附近沒有符合你過濾條件的餐廳，試試放寬條件？</div>
+      <button onclick="this.closest('.no-match-modal').remove()" style="padding:10px 24px;background:var(--accent);color:white;border:none;border-radius:12px;cursor:pointer;font-weight:600;">知道了</button>
+    </div>`;
+    modal.className = 'no-match-modal';
+    modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+    document.body.appendChild(modal);
+    return;
+  }
+
+  const weights = filtered.map(r => {
     const reviews = data.reviews.filter(v => v.restaurantId === r.id);
     const avg = reviews.length > 0 ? reviews.reduce((s,v) => s+v.rating,0) / reviews.length : 3;
     if (avg <= 2) return { r, weight: 0 };
@@ -489,8 +564,7 @@ function doWeightedPick(restaurants) {
   }).filter(item => item.weight > 0);
 
   if (weights.length === 0) {
-    // All are bad or neutral, pick randomly from all
-    const randomR = restaurants[Math.floor(Math.random() * restaurants.length)];
+    const randomR = filtered[Math.floor(Math.random() * filtered.length)];
     lastRandomPick = randomR;
     showRandomResult(randomR);
     return;
@@ -506,6 +580,87 @@ function doWeightedPick(restaurants) {
 
   lastRandomPick = selected;
   showRandomResult(selected);
+}
+
+function buildFilterPanel() {
+  const f = getFilters();
+  const lockIcon = isPremium ? '' : '🔒';
+  const disabledStyle = isPremium ? '' : 'opacity:0.5;pointer-events:none;';
+
+  return `
+    <div style="background:#f8f8f8;border-radius:12px;padding:14px;margin-bottom:14px;text-align:left;">
+      <div style="font-weight:700;margin-bottom:10px;display:flex;align-items:center;gap:6px;">
+        ⚙️ 過濾條件 ${!isPremium ? '<span style="font-size:0.75rem;color:#888;font-weight:normal;">（升級解鎖）</span>' : ''}
+      </div>
+
+      <!-- Distance (Free) -->
+      <div style="margin-bottom:10px;">
+        <div style="font-size:0.85rem;color:#555;margin-bottom:4px;">📍 搜尋範圍</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          ${[500, 1000, 3000, 5000].map(d => `
+            <button onclick="setFilter('distance', ${d})" style="padding:6px 12px;border:1.5px solid ${f.distance === d ? 'var(--accent)' : '#ddd'};border-radius:10px;background:${f.distance === d ? '#fff5f2' : 'white'};cursor:pointer;font-size:0.8rem;color:${f.distance === d ? 'var(--accent)' : '#555'};">
+              ${d >= 1000 ? (d/1000) + 'km' : d + 'm'}
+            </button>
+          `).join('')}
+        </div>
+      </div>
+
+      <!-- Exclude Bad (Free, default on) -->
+      <div style="margin-bottom:10px;display:flex;align-items:center;gap:8px;">
+        <input type="checkbox" id="filterExcludeBad" ${f.excludeBad ? 'checked' : ''} onchange="toggleFilter('excludeBad')" style="cursor:pointer;">
+        <label for="filterExcludeBad" style="font-size:0.85rem;cursor:pointer;">排除我的踩雷店</label>
+      </div>
+
+      <!-- Only Loved -->
+      <div style="margin-bottom:10px;display:flex;align-items:center;gap:8px;${disabledStyle}">
+        <input type="checkbox" id="filterOnlyLoved" ${f.onlyLoved ? 'checked' : ''} onchange="toggleFilter('onlyLoved')" style="cursor:pointer;" ${!isPremium ? 'disabled' : ''}>
+        <label for="filterOnlyLoved" style="font-size:0.85rem;cursor:pointer;">只抽我的愛店 ${lockIcon}</label>
+      </div>
+
+      <!-- No Spicy -->
+      <div style="margin-bottom:10px;display:flex;align-items:center;gap:8px;${disabledStyle}">
+        <input type="checkbox" id="filterNoSpicy" ${f.noSpicy ? 'checked' : ''} onchange="toggleFilter('noSpicy')" style="cursor:pointer;" ${!isPremium ? 'disabled' : ''}>
+        <label for="filterNoSpicy" style="font-size:0.85rem;cursor:pointer;">不吃辣 🌶️❌ ${lockIcon}</label>
+      </div>
+
+      <!-- Min Google Rating -->
+      <div style="margin-bottom:10px;${disabledStyle}">
+        <div style="font-size:0.85rem;color:#555;margin-bottom:4px;">最低 Google 評分 ${lockIcon}</div>
+        <div style="display:flex;gap:6px;">
+          ${[{v:0,l:'不限'},{v:3.5,l:'3.5⭐'},{v:4,l:'4.0⭐'},{v:4.5,l:'4.5⭐'}].map(o => `
+            <button onclick="setFilter('minGoogleRating', ${o.v})" style="padding:6px 10px;border:1.5px solid ${f.minGoogleRating === o.v ? 'var(--accent)' : '#ddd'};border-radius:10px;background:${f.minGoogleRating === o.v ? '#fff5f2' : 'white'};cursor:pointer;font-size:0.8rem;color:${f.minGoogleRating === o.v ? 'var(--accent)' : '#555'};" ${!isPremium ? 'disabled' : ''}>
+              ${o.l}
+            </button>
+          `).join('')}
+        </div>
+      </div>
+
+      <!-- Max Price -->
+      <div style="${disabledStyle}">
+        <div style="font-size:0.85rem;color:#555;margin-bottom:4px;">最高價位 ${lockIcon}</div>
+        <div style="display:flex;gap:6px;">
+          ${[{v:0,l:'不限'},{v:1,l:'$'},{v:2,l:'$$'},{v:3,l:'$$$'},{v:4,l:'$$$$'}].map(o => `
+            <button onclick="setFilter('maxPriceLevel', ${o.v})" style="padding:6px 10px;border:1.5px solid ${f.maxPriceLevel === o.v ? 'var(--accent)' : '#ddd'};border-radius:10px;background:${f.maxPriceLevel === o.v ? '#fff5f2' : 'white'};cursor:pointer;font-size:0.8rem;color:${f.maxPriceLevel === o.v ? 'var(--accent)' : '#555'};" ${!isPremium ? 'disabled' : ''}>
+              ${o.l}
+            </button>
+          `).join('')}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function setFilter(key, value) {
+  filters[key] = value;
+  saveFilters();
+  // Refresh filter panel if visible
+  const panel = document.querySelector('.filter-panel-container');
+  if (panel) panel.innerHTML = buildFilterPanel();
+}
+
+function toggleFilter(key) {
+  filters[key] = !filters[key];
+  saveFilters();
 }
 
 function showRandomResult(r) {
@@ -568,6 +723,10 @@ function showRandomResult(r) {
       <div style="display:flex;gap:10px;margin-top:8px;">
         <a href="https://www.google.com/maps/dir/?api=1&destination=${r.lat || ''},${r.lng || ''}" target="_blank"
            style="flex:1;padding:12px;background:#4285f4;color:white;border-radius:12px;text-decoration:none;font-weight:600;">🧭 導航去這裡</a>
+      </div>
+
+      <div class="filter-panel-container" style="margin-top:16px;">
+        ${buildFilterPanel()}
       </div>
   `;
 
