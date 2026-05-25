@@ -310,7 +310,7 @@
     <!-- Step 1: Restaurant -->
     <div id="stepRestaurant">
       <p style="color:var(--muted);font-size:0.85rem;margin-bottom:8px;">餐廳名稱（會自動搜尋地址）</p>
-      <input type="text" id="restaurantInput" placeholder="例如：鼎泰豐、瓦城..." oninput="searchPlaces()">
+      <input type="text" id="restaurantInput" placeholder="例如：鼎泰豐、瓦城..." maxlength="100" oninput="searchPlaces()">
       <div class="place-results" id="placeResults"></div>
       <input type="hidden" id="selectedPlaceName">
       <input type="hidden" id="selectedPlaceAddress">
@@ -321,7 +321,7 @@
     <!-- Step 2: Dish -->
     <div id="stepDish" class="hidden">
       <p style="color:var(--muted);font-size:0.85rem;margin-bottom:8px;">菜名</p>
-      <input type="text" id="dishInput" placeholder="例如：糖醋排骨、小籠包..." oninput="suggestDishes()">
+      <input type="text" id="dishInput" placeholder="例如：糖醋排骨、小籠包..." maxlength="100" oninput="suggestDishes()">
       <div class="tag-cloud" id="dishSuggestions"></div>
 
       <p style="color:var(--muted);font-size:0.85rem;margin:14px 0 8px;">這道菜整體來說你喜歡嗎？</p>
@@ -348,7 +348,7 @@
       </div>
 
       <p style="color:var(--muted);font-size:0.85rem;margin:14px 0 8px;">備註（選填）</p>
-      <input type="text" id="reviewNote" placeholder="例如：太甜、肉硬、酸甜剛好...">
+      <input type="text" id="reviewNote" placeholder="例如：太甜、肉硬、酸甜剛好..." maxlength="500">
 
       <label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:0.9rem;">
         <input type="checkbox" id="wouldOrderAgain" checked>
@@ -370,6 +370,14 @@ let data = { restaurants: {}, dishes: {}, reviews: [] };
 let currentTab = 'restaurants';
 let modalStep = 1;
 let tempReview = {};
+let _dishSuggestions = [];
+let _placeSuggestions = [];
+
+function genId() {
+  return (typeof crypto !== 'undefined' && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : Date.now().toString(36) + Math.random().toString(36).slice(2);
+}
 
 // Demo data
 function loadDemo() {
@@ -666,7 +674,6 @@ function toggleFilter(key) {
 function showRandomResult(r) {
   const reviews = data.reviews.filter(v => v.restaurantId === r.id);
   const loved = reviews.filter(v => v.rating >= 4);
-  const disliked = reviews.filter(v => v.rating <= 2);
   const warnings = reviews.filter(v => v.rating <= 2 && v.overallDishRating >= 4);
   const isNewDiscovery = r.isNew;
 
@@ -795,7 +802,7 @@ function rerandomPick() {
 function load() {
   const raw = localStorage.getItem(STORAGE_KEY);
   if (raw) {
-    try { data = JSON.parse(raw); } catch(e) {}
+    try { data = JSON.parse(raw); } catch(e) { console.error('Failed to load data:', e); }
   }
   if (Object.keys(data.restaurants).length === 0) loadDemo();
   render();
@@ -962,7 +969,6 @@ function renderMapTab() {
   }
 
   list.innerHTML = restaurants.map(r => {
-    const reviews = data.reviews.filter(v => v.restaurantId === r.id);
     return `
       <div class="card">
         <div class="restaurant-header">
@@ -1189,7 +1195,7 @@ function saveReview() {
   let restaurant = Object.values(data.restaurants).find(r => r.name === restaurantName);
   if (!restaurant) {
     restaurant = {
-      id: 'r' + Date.now(),
+      id: genId(),
       name: restaurantName,
       address: restaurantAddress,
       lat: lat ? parseFloat(lat) : null,
@@ -1202,7 +1208,7 @@ function saveReview() {
   let dish = Object.values(data.dishes).find(d => d.name === dishName);
   if (!dish) {
     dish = {
-      id: 'd' + Date.now(),
+      id: genId(),
       name: dishName,
       category: '',
       overallRating: tempReview.overallDishRating,
@@ -1219,7 +1225,7 @@ function saveReview() {
 
   // Save review
   data.reviews.push({
-    id: 'v' + Date.now(),
+    id: genId(),
     restaurantId: restaurant.id,
     dishId: dish.id,
     dishName: dish.name,
@@ -1238,7 +1244,7 @@ function saveReview() {
 function searchPlaces() {
   const query = document.getElementById('restaurantInput').value.trim();
   const container = document.getElementById('placeResults');
-  if (!query) { container.innerHTML = ''; return; }
+  if (!query) { container.innerHTML = ''; _placeSuggestions = []; return; }
 
   // If Google Places API is available
   if (typeof google !== 'undefined' && google.maps && google.maps.places) {
@@ -1248,16 +1254,22 @@ function searchPlaces() {
       fields: ['name', 'formatted_address', 'geometry', 'place_id']
     }, (results, status) => {
       if (status === google.maps.places.PlacesServiceStatus.OK && results) {
-        container.innerHTML = results.slice(0, 5).map(p => `
-          <div class="place-result" onclick="selectPlace('${escapeHtml(p.name)}', '${escapeHtml(p.formatted_address || '')}', ${p.geometry?.location?.lat() || 'null'}, ${p.geometry?.location?.lng() || 'null'})">
+        _placeSuggestions = results.slice(0, 5).map(p => ({
+          name: p.name,
+          address: p.formatted_address || '',
+          lat: p.geometry?.location?.lat() || null,
+          lng: p.geometry?.location?.lng() || null
+        }));
+        container.innerHTML = _placeSuggestions.map((p, i) => `
+          <div class="place-result" onclick="selectPlaceSuggestion(${i})">
             <div class="place-result-name">${escapeHtml(p.name)}</div>
-            <div class="place-result-address">${escapeHtml(p.formatted_address || '')}</div>
+            <div class="place-result-address">${escapeHtml(p.address)}</div>
           </div>
         `).join('');
       } else {
-        // Fallback: just show the query as custom option
+        _placeSuggestions = [{ name: query, address: '', lat: null, lng: null }];
         container.innerHTML = `
-          <div class="place-result" onclick="selectPlace('${escapeHtml(query)}', '', null, null)">
+          <div class="place-result" onclick="selectPlaceSuggestion(0)">
             <div class="place-result-name">${escapeHtml(query)}</div>
             <div class="place-result-address">手動輸入（無地址）</div>
           </div>
@@ -1265,14 +1277,20 @@ function searchPlaces() {
       }
     });
   } else {
-    // No Google Maps API
+    _placeSuggestions = [{ name: query, address: '', lat: null, lng: null }];
     container.innerHTML = `
-      <div class="place-result" onclick="selectPlace('${escapeHtml(query)}', '', null, null)">
+      <div class="place-result" onclick="selectPlaceSuggestion(0)">
         <div class="place-result-name">${escapeHtml(query)}</div>
         <div class="place-result-address">手動輸入（設定 API Key 後可自動搜尋地址）</div>
       </div>
     `;
   }
+}
+
+function selectPlaceSuggestion(index) {
+  const p = _placeSuggestions[index];
+  if (!p) return;
+  selectPlace(p.name, p.address, p.lat, p.lng);
 }
 
 function selectPlace(name, address, lat, lng) {
@@ -1288,15 +1306,23 @@ function selectPlace(name, address, lat, lng) {
 function suggestDishes() {
   const input = document.getElementById('dishInput').value.trim();
   const container = document.getElementById('dishSuggestions');
-  if (!input) { container.innerHTML = ''; return; }
+  if (!input) { container.innerHTML = ''; _dishSuggestions = []; return; }
 
-  const matches = Object.values(data.dishes)
+  _dishSuggestions = Object.values(data.dishes)
     .filter(d => d.name.includes(input))
     .slice(0, 5);
 
-  container.innerHTML = matches.map(d => `
-    <span class="tag" onclick="document.getElementById('dishInput').value='${escapeHtml(d.name)}';suggestDishes();">${escapeHtml(d.name)}</span>
+  container.innerHTML = _dishSuggestions.map((d, i) => `
+    <span class="tag" onclick="selectDishSuggestion(${i})">${escapeHtml(d.name)}</span>
   `).join('');
+}
+
+function selectDishSuggestion(index) {
+  const d = _dishSuggestions[index];
+  if (d) {
+    document.getElementById('dishInput').value = d.name;
+    suggestDishes();
+  }
 }
 
 // ===== Init =====
