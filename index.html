@@ -260,10 +260,10 @@
 
   <!-- Tabs -->
   <div class="tabs">
-    <button class="tab active" onclick="switchTab('restaurants')">🏪 餐廳</button>
-    <button class="tab" onclick="switchTab('dishes')">🍖 菜品</button>
-    <button class="tab" onclick="switchTab('map')">🗺️ 地圖</button>
-    <button class="tab" onclick="switchTab('recommend')">💡 推薦</button>
+    <button class="tab active" data-tab="restaurants" onclick="switchTab('restaurants')">🏪 餐廳</button>
+    <button class="tab" data-tab="dishes" onclick="switchTab('dishes')">🍖 菜品</button>
+    <button class="tab" data-tab="map" onclick="switchTab('map')">🗺️ 地圖</button>
+    <button class="tab" data-tab="recommend" onclick="switchTab('recommend')">💡 推薦</button>
   </div>
 
   <!-- Search -->
@@ -370,6 +370,8 @@ let data = { restaurants: {}, dishes: {}, reviews: [] };
 let currentTab = 'restaurants';
 let modalStep = 1;
 let tempReview = {};
+let _googleMap = null;
+let _googleMarkers = [];
 
 // Demo data
 function loadDemo() {
@@ -484,7 +486,7 @@ function searchNearbyRestaurants(lat, lng) {
 function pickFromSavedRestaurants() {
   const restaurants = Object.values(data.restaurants);
   if (restaurants.length === 0) {
-    alert('還沒有餐廳紀錄，先記錄幾家吧！');
+    toast('還沒有餐廳紀錄，先記錄幾家吧！', 'warn');
     return;
   }
   doWeightedPick(restaurants);
@@ -740,7 +742,7 @@ function showRandomResult(r) {
     html += `
       <div style="margin-top:12px;font-size:0.85rem;color:#888;">
         免費重抽次數已用完<br>
-        <button onclick="alert('升級解鎖無限重抽！')" style="margin-top:6px;padding:8px 16px;background:linear-gradient(135deg,var(--accent),#d4a373);color:white;border:none;border-radius:10px;cursor:pointer;font-weight:600;">
+        <button onclick="toast('升級解鎖無限重抽！', 'info')" style="margin-top:6px;padding:8px 16px;background:linear-gradient(135deg,var(--accent),#d4a373);color:white;border:none;border-radius:10px;cursor:pointer;font-weight:600;">
           💎 升級無限重抽
         </button>
       </div>
@@ -776,7 +778,7 @@ function addNewRestaurantToMap(gpId) {
 
   data.restaurants[newRestaurant.id] = newRestaurant;
   save();
-  alert(`「${gpRestaurant.name}」已加入你的美食地圖！`);
+  toast(`「${gpRestaurant.name}」已加入你的美食地圖！`, 'success');
 
   // Close modal and refresh
   document.querySelector('.random-modal')?.remove();
@@ -790,6 +792,15 @@ function rerandomPick() {
     document.querySelector('.random-modal')?.remove();
     openRandomPicker();
   }
+}
+
+function toast(msg, type = 'info') {
+  const colors = { info: '#4285f4', success: '#81b29a', warn: '#f2cc8f', error: '#e07a5f' };
+  const el = document.createElement('div');
+  el.style.cssText = `position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:${colors[type]||colors.info};color:white;padding:12px 20px;border-radius:12px;font-size:0.9rem;font-weight:600;z-index:500;box-shadow:0 4px 16px rgba(0,0,0,0.2);pointer-events:none;white-space:nowrap;`;
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 2500);
 }
 
 function load() {
@@ -880,6 +891,7 @@ function renderRestaurants(query) {
                 <div class="dish-review-name">${escapeHtml(v.dishName)} ${v.wouldOrderAgain ? '✅' : '❌'}</div>
                 <div class="dish-review-note">${escapeHtml(v.note || '')}</div>
               </div>
+              <button onclick="event.stopPropagation();deleteReview('${v.id}')" style="background:none;border:none;color:#ccc;cursor:pointer;font-size:1rem;padding:4px;line-height:1;" title="刪除">🗑️</button>
             </div>
           `).join('')}
           ${r.lat ? `<a href="https://www.google.com/maps/dir/?api=1&destination=${r.lat},${r.lng}" target="_blank" class="navigate-btn">🧭 導航去這裡</a>` : ''}
@@ -937,19 +949,26 @@ function renderMapTab() {
   const list = document.getElementById('mapRestaurantList');
   const restaurants = Object.values(data.restaurants).filter(r => r.lat && r.lng);
 
+  // Clear old markers to prevent memory leak
+  _googleMarkers.forEach(m => m.setMap(null));
+  _googleMarkers = [];
+
   // Try to init Google Map if API key is set
   if (typeof google !== 'undefined' && google.maps && restaurants.length > 0) {
     try {
-      const map = new google.maps.Map(document.getElementById('map'), {
-        center: { lat: restaurants[0].lat, lng: restaurants[0].lng },
-        zoom: 13,
-      });
+      const mapEl = document.getElementById('map');
+      if (!_googleMap) {
+        _googleMap = new google.maps.Map(mapEl, {
+          center: { lat: restaurants[0].lat, lng: restaurants[0].lng },
+          zoom: 13,
+        });
+      }
       restaurants.forEach(r => {
         const reviews = data.reviews.filter(v => v.restaurantId === r.id);
         const avg = reviews.length > 0 ? reviews.reduce((s,v) => s+v.rating,0)/reviews.length : 0;
-        new google.maps.Marker({
+        const marker = new google.maps.Marker({
           position: { lat: r.lat, lng: r.lng },
-          map,
+          map: _googleMap,
           title: r.name,
           icon: avg >= 4
             ? 'https://maps.google.com/mapfiles/ms/icons/green-dot.png'
@@ -957,6 +976,7 @@ function renderMapTab() {
               ? 'https://maps.google.com/mapfiles/ms/icons/yellow-dot.png'
               : 'https://maps.google.com/mapfiles/ms/icons/red-dot.png'
         });
+        _googleMarkers.push(marker);
       });
     } catch(e) {}
   }
@@ -1080,7 +1100,7 @@ function findAvoids() {
 // ===== UI Helpers =====
 function switchTab(tab) {
   currentTab = tab;
-  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.textContent.includes(tab === 'restaurants' ? '餐廳' : tab === 'dishes' ? '菜品' : tab === 'map' ? '地圖' : '推薦')));
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
   document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
   document.getElementById(tab + 'Tab').classList.remove('hidden');
   render();
@@ -1132,17 +1152,17 @@ function prevStep() {
 function nextOrSave() {
   if (modalStep === 1) {
     const name = document.getElementById('selectedPlaceName').value;
-    if (!name) { alert('請選擇或輸入餐廳'); return; }
+    if (!name) { toast('請選擇或輸入餐廳', 'warn'); return; }
     modalStep = 2;
     updateModalView();
   } else if (modalStep === 2) {
     const dish = document.getElementById('dishInput').value.trim();
-    if (!dish) { alert('請輸入菜名'); return; }
-    if (!tempReview.overallDishRating) { alert('請選擇你對這道菜的整體喜好'); return; }
+    if (!dish) { toast('請輸入菜名', 'warn'); return; }
+    if (!tempReview.overallDishRating) { toast('請選擇你對這道菜的整體喜好', 'warn'); return; }
     modalStep = 3;
     updateModalView();
   } else if (modalStep === 3) {
-    if (!tempReview.rating) { alert('請評價這家店的這道菜'); return; }
+    if (!tempReview.rating) { toast('請評價這家店的這道菜', 'warn'); return; }
     saveReview();
     closeModal();
     render();
@@ -1235,43 +1255,50 @@ function saveReview() {
 }
 
 // ===== Google Places Search =====
+function makePlaceResultEl(name, address, lat, lng, sublabel) {
+  const el = document.createElement('div');
+  el.className = 'place-result';
+  const nameDiv = document.createElement('div');
+  nameDiv.className = 'place-result-name';
+  nameDiv.textContent = name;
+  const addrDiv = document.createElement('div');
+  addrDiv.className = 'place-result-address';
+  addrDiv.textContent = sublabel || address;
+  el.appendChild(nameDiv);
+  el.appendChild(addrDiv);
+  el.addEventListener('click', () => selectPlace(name, address, lat, lng));
+  return el;
+}
+
 function searchPlaces() {
   const query = document.getElementById('restaurantInput').value.trim();
   const container = document.getElementById('placeResults');
-  if (!query) { container.innerHTML = ''; return; }
+  container.innerHTML = '';
+  if (!query) return;
 
-  // If Google Places API is available
   if (typeof google !== 'undefined' && google.maps && google.maps.places) {
     const service = new google.maps.places.PlacesService(document.createElement('div'));
     service.findPlaceFromQuery({
       query: query,
       fields: ['name', 'formatted_address', 'geometry', 'place_id']
     }, (results, status) => {
+      container.innerHTML = '';
       if (status === google.maps.places.PlacesServiceStatus.OK && results) {
-        container.innerHTML = results.slice(0, 5).map(p => `
-          <div class="place-result" onclick="selectPlace('${escapeHtml(p.name)}', '${escapeHtml(p.formatted_address || '')}', ${p.geometry?.location?.lat() || 'null'}, ${p.geometry?.location?.lng() || 'null'})">
-            <div class="place-result-name">${escapeHtml(p.name)}</div>
-            <div class="place-result-address">${escapeHtml(p.formatted_address || '')}</div>
-          </div>
-        `).join('');
+        results.slice(0, 5).forEach(p => {
+          container.appendChild(makePlaceResultEl(
+            p.name,
+            p.formatted_address || '',
+            p.geometry?.location?.lat() || null,
+            p.geometry?.location?.lng() || null,
+            p.formatted_address || ''
+          ));
+        });
       } else {
-        // Fallback: just show the query as custom option
-        container.innerHTML = `
-          <div class="place-result" onclick="selectPlace('${escapeHtml(query)}', '', null, null)">
-            <div class="place-result-name">${escapeHtml(query)}</div>
-            <div class="place-result-address">手動輸入（無地址）</div>
-          </div>
-        `;
+        container.appendChild(makePlaceResultEl(query, '', null, null, '手動輸入（無地址）'));
       }
     });
   } else {
-    // No Google Maps API
-    container.innerHTML = `
-      <div class="place-result" onclick="selectPlace('${escapeHtml(query)}', '', null, null)">
-        <div class="place-result-name">${escapeHtml(query)}</div>
-        <div class="place-result-address">手動輸入（設定 API Key 後可自動搜尋地址）</div>
-      </div>
-    `;
+    container.appendChild(makePlaceResultEl(query, '', null, null, '手動輸入（設定 API Key 後可自動搜尋地址）'));
   }
 }
 
@@ -1288,15 +1315,52 @@ function selectPlace(name, address, lat, lng) {
 function suggestDishes() {
   const input = document.getElementById('dishInput').value.trim();
   const container = document.getElementById('dishSuggestions');
-  if (!input) { container.innerHTML = ''; return; }
+  container.innerHTML = '';
+  if (!input) return;
 
-  const matches = Object.values(data.dishes)
+  Object.values(data.dishes)
     .filter(d => d.name.includes(input))
-    .slice(0, 5);
+    .slice(0, 5)
+    .forEach(d => {
+      const el = document.createElement('span');
+      el.className = 'tag';
+      el.textContent = d.name;
+      el.addEventListener('click', () => {
+        document.getElementById('dishInput').value = d.name;
+        suggestDishes();
+      });
+      container.appendChild(el);
+    });
+}
 
-  container.innerHTML = matches.map(d => `
-    <span class="tag" onclick="document.getElementById('dishInput').value='${escapeHtml(d.name)}';suggestDishes();">${escapeHtml(d.name)}</span>
-  `).join('');
+function deleteReview(reviewId) {
+  const review = data.reviews.find(v => v.id === reviewId);
+  if (!review) return;
+  if (!confirm(`確定刪除「${review.dishName}」在「${review.restaurantName}」的評價？`)) return;
+
+  data.reviews = data.reviews.filter(v => v.id !== reviewId);
+
+  // Update dish triedCount
+  const dish = Object.values(data.dishes).find(d => d.id === review.dishId);
+  if (dish) {
+    const remaining = data.reviews.filter(v => v.dishId === dish.id);
+    if (remaining.length === 0) {
+      delete data.dishes[dish.id];
+    } else {
+      dish.triedCount = remaining.length;
+      const avg = Math.round(remaining.reduce((s,v) => s+v.overallDishRating,0) / remaining.length);
+      dish.overallRating = avg;
+    }
+  }
+
+  // Remove restaurant if no reviews remain
+  const restaurantReviews = data.reviews.filter(v => v.restaurantId === review.restaurantId);
+  if (restaurantReviews.length === 0) {
+    delete data.restaurants[review.restaurantId];
+  }
+
+  save();
+  render();
 }
 
 // ===== Init =====
