@@ -395,6 +395,7 @@
 const STORAGE_KEY = 'foodMap_v2';
 let data = { restaurants: {}, dishes: {}, reviews: [] };
 let currentTab = 'restaurants';
+let restaurantFilterMode = 'all';
 let modalStep = 1;
 let tempReview = {};
 let _googleMap = null;
@@ -844,9 +845,36 @@ function updateStats() {
   document.getElementById('statReviews').textContent = data.reviews.length;
 }
 
+function setRestaurantFilter(mode) {
+  restaurantFilterMode = mode;
+  render();
+}
+
 function renderRestaurants(query) {
   const list = document.getElementById('restaurantList');
+
+  // 計算每間餐廳的平均評分（無評價回傳 -1）
+  const getAvg = (r) => {
+    const rv = data.reviews.filter(v => v.restaurantId === r.id);
+    return rv.length > 0 ? rv.reduce((s, v) => s + v.rating, 0) / rv.length : -1;
+  };
+
   let restaurants = Object.values(data.restaurants);
+
+  // 篩選數量統計
+  const counts = {
+    all: restaurants.length,
+    five: restaurants.filter(r => getAvg(r) === 5).length,
+    loved: restaurants.filter(r => getAvg(r) >= 4).length,
+    warn: restaurants.filter(r => { const a = getAvg(r); return a >= 0 && a <= 2; }).length,
+  };
+
+  // 套用評分篩選
+  if (restaurantFilterMode === 'five') restaurants = restaurants.filter(r => getAvg(r) === 5);
+  else if (restaurantFilterMode === 'loved') restaurants = restaurants.filter(r => getAvg(r) >= 4);
+  else if (restaurantFilterMode === 'warn') restaurants = restaurants.filter(r => { const a = getAvg(r); return a >= 0 && a <= 2; });
+
+  // 搜尋篩選
   if (query) {
     restaurants = restaurants.filter(r =>
       r.name.toLowerCase().includes(query) ||
@@ -854,12 +882,33 @@ function renderRestaurants(query) {
     );
   }
 
+  // 按評分排序（高→低，無評價排最後）
+  restaurants.sort((a, b) => {
+    const aA = getAvg(a), bA = getAvg(b);
+    if (aA < 0 && bA < 0) return 0;
+    if (aA < 0) return 1;
+    if (bA < 0) return -1;
+    return bA - aA;
+  });
+
+  // 篩選列
+  const chip = (mode, label, count) => {
+    const active = restaurantFilterMode === mode;
+    return `<button onclick="setRestaurantFilter('${mode}')" style="padding:6px 14px;border-radius:20px;border:1.5px solid ${active ? 'var(--accent)' : '#e8e8e8'};background:${active ? '#fff5f2' : 'white'};color:${active ? 'var(--accent)' : '#666'};font-size:0.82rem;font-weight:600;cursor:pointer;white-space:nowrap;">${label} <span style="opacity:0.6;font-weight:400;">${count}</span></button>`;
+  };
+  const filterBar = `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;overflow-x:auto;padding-bottom:2px;">
+    ${chip('all', '全部', counts.all)}
+    ${chip('five', '⭐⭐⭐⭐⭐', counts.five)}
+    ${chip('loved', '❤️ 四星以上', counts.loved)}
+    ${chip('warn', '⚠️ 踩雷', counts.warn)}
+  </div>`;
+
   if (restaurants.length === 0) {
-    list.innerHTML = '<div class="empty-state"><div class="icon">🍽️</div><p>還沒有餐廳紀錄</p></div>';
+    list.innerHTML = filterBar + `<div class="empty-state"><div class="icon">🍽️</div><p>${Object.keys(data.restaurants).length === 0 ? '還沒有餐廳紀錄' : '沒有符合條件的餐廳'}</p></div>`;
     return;
   }
 
-  list.innerHTML = restaurants.map(r => {
+  list.innerHTML = filterBar + restaurants.map(r => {
     const reviews = data.reviews.filter(v => v.restaurantId === r.id);
     const likes = reviews.filter(v => v.rating >= 4);
     const dislikes = reviews.filter(v => v.rating <= 2);
