@@ -367,6 +367,15 @@
         <input type="checkbox" id="wouldOrderAgain" checked>
         會再點這道
       </label>
+
+      <p style="color:var(--muted);font-size:0.85rem;margin:14px 0 8px;">這家店整體印象（選填）</p>
+      <div class="rating-row" id="restaurantRatingRow">
+        <button class="rating-btn" onclick="setRestaurantRating(5)">超棒 ❤️❤️❤️❤️❤️</button>
+        <button class="rating-btn" onclick="setRestaurantRating(4)">不錯 ❤️❤️❤️❤️</button>
+        <button class="rating-btn" onclick="setRestaurantRating(3)">普通 ❤️❤️❤️</button>
+        <button class="rating-btn" onclick="setRestaurantRating(2)">還好 ❤️❤️</button>
+        <button class="rating-btn" onclick="setRestaurantRating(1)">不推 ❤️</button>
+      </div>
     </div>
 
     <div class="modal-actions">
@@ -406,9 +415,9 @@ let _googleMarkers = [];
 function loadDemo() {
   data = {
     restaurants: {
-      "r1": { id: "r1", name: "瓦城", address: "台北市大安區信義路", lat: 25.0339, lng: 121.5282 },
-      "r2": { id: "r2", name: "巷口熱炒", address: "台北市中山區", lat: 25.0622, lng: 121.5270 },
-      "r3": { id: "r3", name: "鼎泰豐", address: "台北市大安區信義路二段 194 號", lat: 25.0330, lng: 121.5300 },
+      "r1": { id: "r1", name: "瓦城", address: "台北市大安區信義路", lat: 25.0339, lng: 121.5282, myRating: 4 },
+      "r2": { id: "r2", name: "巷口熱炒", address: "台北市中山區", lat: 25.0622, lng: 121.5270, myRating: 5 },
+      "r3": { id: "r3", name: "鼎泰豐", address: "台北市大安區信義路二段 194 號", lat: 25.0330, lng: 121.5300, myRating: 5 },
     },
     dishes: {
       "d1": { id: "d1", name: "糖醋排骨", category: "中式熱炒", overallRating: 5, triedCount: 3 },
@@ -416,10 +425,10 @@ function loadDemo() {
       "d3": { id: "d3", name: "小籠包", category: "中式點心", overallRating: 4, triedCount: 1 },
     },
     reviews: [
-      { id: "v1", restaurantId: "r1", dishId: "d1", dishName: "糖醋排骨", restaurantName: "瓦城", rating: 1, overallDishRating: 5, note: "太甜、肉硬、沒有靈魂", wouldOrderAgain: false, date: "2026-04-15" },
-      { id: "v2", restaurantId: "r2", dishId: "d1", dishName: "糖醋排骨", restaurantName: "巷口熱炒", rating: 5, overallDishRating: 5, note: "酸甜剛好、外酥內嫩", wouldOrderAgain: true, date: "2026-03-20" },
-      { id: "v3", restaurantId: "r1", dishId: "d2", dishName: "蝦醬空心菜", restaurantName: "瓦城", rating: 5, overallDishRating: 4, note: "每次都點", wouldOrderAgain: true, date: "2026-04-10" },
-      { id: "v4", restaurantId: "r3", dishId: "d3", dishName: "小籠包", restaurantName: "鼎泰豐", rating: 5, overallDishRating: 4, note: "皮薄汁多", wouldOrderAgain: true, date: "2026-02-01" },
+      { id: "v1", restaurantId: "r1", dishId: "d1", dishName: "糖醋排骨", restaurantName: "瓦城", rating: 1, overallDishRating: 5, restaurantRating: 4, note: "太甜、肉硬、沒有靈魂", wouldOrderAgain: false, date: "2026-04-15" },
+      { id: "v2", restaurantId: "r2", dishId: "d1", dishName: "糖醋排骨", restaurantName: "巷口熱炒", rating: 5, overallDishRating: 5, restaurantRating: 5, note: "酸甜剛好、外酥內嫩", wouldOrderAgain: true, date: "2026-03-20" },
+      { id: "v3", restaurantId: "r1", dishId: "d2", dishName: "蝦醬空心菜", restaurantName: "瓦城", rating: 5, overallDishRating: 4, restaurantRating: null, note: "每次都點", wouldOrderAgain: true, date: "2026-04-10" },
+      { id: "v4", restaurantId: "r3", dishId: "d3", dishName: "小籠包", restaurantName: "鼎泰豐", rating: 5, overallDishRating: 4, restaurantRating: 5, note: "皮薄汁多", wouldOrderAgain: true, date: "2026-02-01" },
     ]
   };
   save();
@@ -719,6 +728,11 @@ function showRandomResult(r) {
     <div style="color:#888;font-size:0.9rem;margin-bottom:8px;">${escapeHtml(r.address || '')}</div>
   `;
 
+  // My restaurant rating
+  if (r.myRating > 0) {
+    html += `<div style="font-size:0.9rem;margin-bottom:8px;">我的印象：${'❤️'.repeat(r.myRating)}</div>`;
+  }
+
   // Google rating
   if (r.rating > 0) {
     html += `<div style="font-size:0.85rem;color:#888;margin-bottom:12px;">Google 評價：${'⭐'.repeat(Math.round(r.rating))} ${r.rating}（${r.userRatingsTotal || 0} 則評論）</div>`;
@@ -854,11 +868,8 @@ function setRestaurantFilter(mode) {
 function renderRestaurants(query) {
   const list = document.getElementById('restaurantList');
 
-  // 計算每間餐廳的平均評分（無評價回傳 -1）
-  const getAvg = (r) => {
-    const rv = data.reviews.filter(v => v.restaurantId === r.id);
-    return rv.length > 0 ? rv.reduce((s, v) => s + v.rating, 0) / rv.length : -1;
-  };
+  // 餐廳整體評分用 myRating（你對這家店的整體印象），未填回傳 -1
+  const getAvg = (r) => r.myRating ?? -1;
 
   let restaurants = Object.values(data.restaurants);
 
@@ -926,7 +937,7 @@ function renderRestaurants(query) {
           <div class="restaurant-info">
             <div class="restaurant-name">${escapeHtml(r.name)}</div>
             <div class="restaurant-meta">${escapeHtml(r.address || '')}</div>
-            <div class="stars">${stars} (${reviews.length} 道)</div>
+            <div class="stars">${r.myRating ? '❤️'.repeat(r.myRating) + ' · ' : ''}${reviews.length} 道</div>
           </div>
         </div>
         <div class="dish-preview">
@@ -1289,8 +1300,15 @@ function setDishOverall(rating) {
 
 function setReviewRating(rating) {
   tempReview.rating = rating;
-  document.querySelectorAll('#stepRating .rating-btn').forEach((b, i) => {
+  document.querySelectorAll('#stepRating .rating-btn:not(#restaurantRatingRow .rating-btn)').forEach((b, i) => {
     b.classList.toggle('selected', 5 - i === rating);
+  });
+}
+
+function setRestaurantRating(rating) {
+  tempReview.restaurantRating = tempReview.restaurantRating === rating ? null : rating;
+  document.querySelectorAll('#restaurantRatingRow .rating-btn').forEach((b, i) => {
+    b.classList.toggle('selected', 5 - i === tempReview.restaurantRating);
   });
 }
 
@@ -1314,6 +1332,15 @@ function saveReview() {
       lng: lng ? parseFloat(lng) : null
     };
     data.restaurants[restaurant.id] = restaurant;
+  }
+
+  // Update restaurant myRating from all restaurant-level ratings (including this one)
+  if (tempReview.restaurantRating) {
+    const pastRatings = data.reviews
+      .filter(v => v.restaurantId === restaurant.id && v.restaurantRating)
+      .map(v => v.restaurantRating);
+    pastRatings.push(tempReview.restaurantRating);
+    restaurant.myRating = Math.round(pastRatings.reduce((s, r) => s + r, 0) / pastRatings.length);
   }
 
   // Find or create dish
@@ -1344,6 +1371,7 @@ function saveReview() {
     restaurantName: restaurant.name,
     rating: tempReview.rating,
     overallDishRating: tempReview.overallDishRating,
+    restaurantRating: tempReview.restaurantRating || null,
     note,
     wouldOrderAgain,
     date: new Date().toISOString().split('T')[0]
