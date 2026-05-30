@@ -4,8 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>我的美食地圖 🍽️ | Food Map</title>
-<!-- Google Maps API - 需要替換 YOUR_API_KEY -->
-<script src="https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY&libraries=places" async defer></script>
+<!-- Google Maps API 動態載入（設定 API Key 後才載入） -->
 <style>
   :root {
     --bg: #faf8f5;
@@ -228,6 +227,18 @@
 
   .hidden { display: none !important; }
 
+  .settings-btn {
+    position: absolute; top: 14px; right: 16px;
+    background: rgba(255,255,255,0.2); border: none; color: white;
+    border-radius: 50%; width: 38px; height: 38px; font-size: 1.1rem;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+  }
+  .settings-btn:hover { background: rgba(255,255,255,0.35); }
+  .api-key-hint {
+    background: #fff8e1; border: 1px solid #ffe082; border-radius: 12px;
+    padding: 12px 16px; margin-bottom: 14px; font-size: 0.85rem; color: #7a5c00;
+    display: flex; align-items: center; gap: 8px;
+  }
   @media (max-width: 480px) {
     header h1 { font-size: 1.4rem; }
     .tabs { padding: 4px; }
@@ -237,7 +248,8 @@
 </head>
 <body>
 
-<header>
+<header style="position:relative;">
+  <button class="settings-btn" onclick="openFoodSettings()" title="設定 Google Maps API Key">⚙️</button>
   <h1>🍽️ 我的美食地圖</h1>
   <p>記錄每道菜在每間店的愛與恨，下次不再踩雷</p>
   <div class="stats-bar">
@@ -286,8 +298,9 @@
     <div id="map">
       <div class="map-fallback">
         <div class="icon" style="font-size:3rem;">🗺️</div>
-        <p>請在上方設定 Google Maps API Key 以顯示地圖</p>
-        <p style="font-size:0.8rem;">或點擊下方導航按鈕使用 Google Maps</p>
+        <p>點右上角 ⚙️ 設定 Google Maps API Key 即可顯示地圖</p>
+        <p style="font-size:0.8rem;margin-top:4px;">下方清單仍可點擊導航按鈕</p>
+        <button onclick="openFoodSettings()" style="margin-top:12px;padding:8px 18px;background:var(--accent);color:white;border:none;border-radius:10px;cursor:pointer;font-weight:600;font-size:0.85rem;">⚙️ 設定 API Key</button>
       </div>
     </div>
     <div id="mapRestaurantList"></div>
@@ -363,6 +376,20 @@
   </div>
 </div>
 
+<!-- Settings Modal -->
+<div class="modal-overlay" id="settingsOverlay" onclick="if(event.target===this)closeFoodSettings()">
+  <div class="modal" onclick="event.stopPropagation()" style="max-width:400px;">
+    <h2>⚙️ Google Maps API Key</h2>
+    <p style="color:var(--muted);font-size:0.85rem;margin:8px 0 14px;">設定後可啟用：附近餐廳搜尋、地圖顯示、自動補全地址<br>（只存在本機，不會上傳）</p>
+    <input type="password" id="mapsKeyInput" placeholder="AIzaSy..." style="font-family:monospace;">
+    <p style="font-size:0.78rem;color:var(--mapsHint,#aaa);margin-bottom:14px;">沒有 API Key 也可正常使用，只是地圖相關功能不可用</p>
+    <div class="modal-actions" style="margin-top:0;">
+      <button class="btn-cancel" onclick="closeFoodSettings()">取消</button>
+      <button class="btn-confirm" onclick="saveFoodSettings()">儲存</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ===== 資料模型 =====
 const STORAGE_KEY = 'foodMap_v2';
@@ -397,10 +424,9 @@ function loadDemo() {
 }
 
 // ===== Random Picker =====
-let randomPickerCount = parseInt(localStorage.getItem('foodMap_randomCount') || '3');
 let lastRandomPick = null;
 let filters = JSON.parse(localStorage.getItem('foodMap_filters') || '{}');
-const isPremium = false; // TODO: connect to payment
+const isPremium = true;
 
 function getFilters() {
   return {
@@ -732,22 +758,11 @@ function showRandomResult(r) {
       </div>
   `;
 
-  if (randomPickerCount > 0) {
-    html += `
-      <button onclick="rerandomPick()" style="margin-top:12px;padding:10px 20px;background:#f5f5f5;border:none;border-radius:10px;cursor:pointer;font-weight:600;">
-        🔄 重抽（還有 ${randomPickerCount} 次）
-      </button>
-    `;
-  } else {
-    html += `
-      <div style="margin-top:12px;font-size:0.85rem;color:#888;">
-        免費重抽次數已用完<br>
-        <button onclick="toast('升級解鎖無限重抽！', 'info')" style="margin-top:6px;padding:8px 16px;background:linear-gradient(135deg,var(--accent),#d4a373);color:white;border:none;border-radius:10px;cursor:pointer;font-weight:600;">
-          💎 升級無限重抽
-        </button>
-      </div>
-    `;
-  }
+  html += `
+    <button onclick="rerandomPick()" style="margin-top:12px;padding:10px 20px;background:#f5f5f5;border:none;border-radius:10px;cursor:pointer;font-weight:600;">
+      🔄 換一家試試
+    </button>
+  `;
 
   html += `</div>`;
 
@@ -786,12 +801,8 @@ function addNewRestaurantToMap(gpId) {
 }
 
 function rerandomPick() {
-  if (randomPickerCount > 0) {
-    randomPickerCount--;
-    localStorage.setItem('foodMap_randomCount', randomPickerCount.toString());
-    document.querySelector('.random-modal')?.remove();
-    openRandomPicker();
-  }
+  document.querySelector('.random-modal')?.remove();
+  openRandomPicker();
 }
 
 function toast(msg, type = 'info') {
@@ -1363,7 +1374,50 @@ function deleteReview(reviewId) {
   render();
 }
 
+// ===== Google Maps 動態載入 =====
+function getMapsKey() { return localStorage.getItem('foodMap_mapsKey') ?? ''; }
+
+function loadMapsApi() {
+  const key = getMapsKey();
+  if (!key || window._mapsLoading || typeof google !== 'undefined') return;
+  window._mapsLoading = true;
+  const script = document.createElement('script');
+  script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&libraries=places&callback=onMapsApiLoaded`;
+  document.head.appendChild(script);
+}
+
+window.onMapsApiLoaded = function() {
+  window._mapsLoading = false;
+  toast('🗺️ 地圖功能已啟用！', 'success');
+  if (currentTab === 'map') renderMapTab();
+};
+
+function openFoodSettings() {
+  document.getElementById('mapsKeyInput').value = getMapsKey();
+  document.getElementById('settingsOverlay').classList.add('open');
+}
+
+function closeFoodSettings() {
+  document.getElementById('settingsOverlay').classList.remove('open');
+}
+
+function saveFoodSettings() {
+  const key = document.getElementById('mapsKeyInput').value.trim();
+  if (key) localStorage.setItem('foodMap_mapsKey', key);
+  else localStorage.removeItem('foodMap_mapsKey');
+  closeFoodSettings();
+  if (key && typeof google === 'undefined') {
+    loadMapsApi();
+    toast('API Key 已儲存，載入地圖中...', 'info');
+  } else if (!key) {
+    toast('API Key 已清除', 'info');
+  } else {
+    toast('已儲存', 'success');
+  }
+}
+
 // ===== Init =====
+loadMapsApi();
 load();
 </script>
 
