@@ -396,6 +396,7 @@ const STORAGE_KEY = 'foodMap_v2';
 let data = { restaurants: {}, dishes: {}, reviews: [] };
 let currentTab = 'restaurants';
 let restaurantFilterMode = 'all';
+let dishFilterMode = 'all';
 let modalStep = 1;
 let tempReview = {};
 let _googleMap = null;
@@ -961,17 +962,54 @@ function renderRestaurants(query) {
   }).join('');
 }
 
+function setDishFilter(mode) {
+  dishFilterMode = mode;
+  render();
+}
+
 function renderDishes(query) {
   const list = document.getElementById('dishList');
   let dishes = Object.values(data.dishes);
   if (query) dishes = dishes.filter(d => d.name.toLowerCase().includes(query));
 
+  // Count for filter chips
+  const counts = {
+    all: dishes.length,
+    five: dishes.filter(d => d.overallRating === 5).length,
+    loved: dishes.filter(d => d.overallRating >= 4).length,
+    warn: dishes.filter(d => d.overallRating > 0 && d.overallRating <= 2).length,
+  };
+
+  // Apply filter
+  if (dishFilterMode === 'five') dishes = dishes.filter(d => d.overallRating === 5);
+  else if (dishFilterMode === 'loved') dishes = dishes.filter(d => d.overallRating >= 4);
+  else if (dishFilterMode === 'warn') dishes = dishes.filter(d => d.overallRating > 0 && d.overallRating <= 2);
+
+  // Sort: highest rating first, unrated last
+  dishes.sort((a, b) => {
+    if (a.overallRating === 0 && b.overallRating === 0) return 0;
+    if (a.overallRating === 0) return 1;
+    if (b.overallRating === 0) return -1;
+    return b.overallRating - a.overallRating;
+  });
+
+  const chip = (mode, label, count) => {
+    const active = dishFilterMode === mode;
+    return `<button onclick="setDishFilter('${mode}')" style="padding:6px 14px;border-radius:20px;border:1.5px solid ${active ? 'var(--accent)' : '#e8e8e8'};background:${active ? '#fff5f2' : 'white'};color:${active ? 'var(--accent)' : '#666'};font-size:0.82rem;font-weight:600;cursor:pointer;white-space:nowrap;">${label} <span style="opacity:0.6;font-weight:400;">${count}</span></button>`;
+  };
+  const filterBar = `<div style="display:flex;gap:8px;overflow-x:auto;padding:4px 0 12px;-webkit-overflow-scrolling:touch;scrollbar-width:none;">
+    ${chip('all','全部',counts.all)}
+    ${chip('five','❤️×5',counts.five)}
+    ${chip('loved','❤️×4↑',counts.loved)}
+    ${chip('warn','💔踩雷',counts.warn)}
+  </div>`;
+
   if (dishes.length === 0) {
-    list.innerHTML = '<div class="empty-state"><div class="icon">🍖</div><p>還沒有菜品紀錄</p></div>';
+    list.innerHTML = filterBar + '<div class="empty-state"><div class="icon">🍖</div><p>沒有符合條件的菜品</p></div>';
     return;
   }
 
-  list.innerHTML = dishes.map(d => {
+  list.innerHTML = filterBar + dishes.map(d => {
     const reviews = data.reviews.filter(v => v.dishId === d.id).sort((a,b) => b.rating - a.rating);
     const avg = reviews.length > 0 ? (reviews.reduce((s,v) => s+v.rating,0)/reviews.length).toFixed(1) : 0;
 
