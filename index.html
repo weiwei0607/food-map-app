@@ -239,6 +239,50 @@
     padding: 12px 16px; margin-bottom: 14px; font-size: 0.85rem; color: #7a5c00;
     display: flex; align-items: center; gap: 8px;
   }
+
+  /* Skeleton Loading */
+  @keyframes shimmer {
+    0% { background-position: -200px 0; }
+    100% { background-position: calc(200px + 100%) 0; }
+  }
+  .skeleton {
+    background: #f0f0f0;
+    background-image: linear-gradient(90deg, #f0f0f0 25%, #e8e8e8 50%, #f0f0f0 75%);
+    background-size: 200px 100%;
+    background-repeat: no-repeat;
+    animation: shimmer 1.2s ease-in-out infinite;
+    border-radius: 12px;
+  }
+  .skeleton-card {
+    background: var(--card);
+    border-radius: 18px;
+    padding: 20px;
+    margin-bottom: 16px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.05);
+  }
+  .skeleton-header { display: flex; gap: 14px; margin-bottom: 12px; }
+  .skeleton-icon { width: 52px; height: 52px; border-radius: 14px; flex-shrink: 0; }
+  .skeleton-lines { flex: 1; display: flex; flex-direction: column; gap: 8px; }
+  .skeleton-line { height: 14px; border-radius: 8px; }
+  .skeleton-line.short { width: 60%; }
+  .skeleton-chips { display: flex; gap: 8px; margin-top: 10px; }
+  .skeleton-chip { height: 24px; width: 80px; border-radius: 12px; }
+
+  /* Offline Indicator */
+  .offline-bar {
+    background: #333; color: #fff; text-align: center;
+    padding: 8px; font-size: 0.85rem; font-weight: 600;
+    display: none; position: sticky; top: 0; z-index: 100;
+  }
+  .offline-bar.show { display: block; }
+
+  /* Improved empty state */
+  .empty-state .action-btn {
+    display: inline-block; margin-top: 14px; padding: 10px 20px;
+    background: var(--accent); color: white; border: none; border-radius: 12px;
+    font-weight: 600; font-size: 0.9rem; cursor: pointer;
+  }
+
   @media (max-width: 480px) {
     header h1 { font-size: 1.4rem; }
     .tabs { padding: 4px; }
@@ -258,6 +302,8 @@
     <div class="stat"><div class="stat-num" id="statReviews">0</div><div class="stat-label">筆評價</div></div>
   </div>
 </header>
+
+<div id="offlineBar" class="offline-bar">📴 目前離線中，部分功能可能無法使用</div>
 
 <div class="nav"><a href="index.html">← 回首頁</a></div>
 
@@ -410,6 +456,37 @@ let modalStep = 1;
 let tempReview = {};
 let _googleMap = null;
 let _googleMarkers = [];
+let _isLoading = true;
+let _isOnline = navigator.onLine;
+let _mapsLoadFailed = false;
+
+// Offline indicator
+function updateOnlineStatus() {
+  _isOnline = navigator.onLine;
+  const bar = document.getElementById('offlineBar');
+  if (bar) bar.classList.toggle('show', !_isOnline);
+}
+window.addEventListener('online', updateOnlineStatus);
+window.addEventListener('offline', updateOnlineStatus);
+
+// Skeleton helpers
+function skeletonCard(count = 3) {
+  return Array.from({ length: count }, () => `
+    <div class="skeleton-card">
+      <div class="skeleton-header">
+        <div class="skeleton skeleton-icon"></div>
+        <div class="skeleton-lines">
+          <div class="skeleton skeleton-line"></div>
+          <div class="skeleton skeleton-line short"></div>
+        </div>
+      </div>
+      <div class="skeleton-chips">
+        <div class="skeleton skeleton-chip"></div>
+        <div class="skeleton skeleton-chip"></div>
+      </div>
+    </div>
+  `).join('');
+}
 
 // Demo data
 function loadDemo() {
@@ -455,43 +532,87 @@ function saveFilters() {
   localStorage.setItem('foodMap_filters', JSON.stringify(filters));
 }
 
+const NEARBY_CACHE_KEY = 'foodMap_nearbyCache';
+const NEARBY_CACHE_TTL = 1000 * 60 * 30; // 30 minutes
+
 async function openRandomPicker() {
-  // Try to get GPS and search nearby restaurants first
-  if (navigator.geolocation && typeof google !== 'undefined' && google.maps && google.maps.places) {
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        const lat = position.coords.latitude;
-        const lng = position.coords.longitude;
-        const nearby = await searchNearbyRestaurants(lat, lng);
-        if (nearby.length > 0) {
-          pickFromRestaurants(nearby);
-        } else {
-          pickFromSavedRestaurants();
-        }
-      },
-      () => {
-        // GPS failed, fallback to saved restaurants
+  if (!_isOnline) {
+    toast('目前離線，從已儲存的餐廳抽選', 'warn');
+    pickFromSavedRestaurants();
+    return;
+  }
+
+  if (typeof google === 'undefined' || !google.maps || !google.maps.places) {
+    toast('地圖功能未啟用，從已儲存的餐廳抽選', 'warn');
+    pickFromSavedRestaurants();
+    return;
+  }
+
+  if (!navigator.geolocation) {
+    toast('您的裝置不支援定位，從已儲存的餐廳抽選', 'warn');
+    pickFromSavedRestaurants();
+    return;
+  }
+
+  // Show loading toast
+  toast('正在定位附近餐廳...', 'info');
+
+  const geoTimeout = setTimeout(() => {
+    toast('定位時間過長，改從已儲存的餐廳抽選', 'warn');
+    pickFromSavedRestaurants();
+  }, 10000);
+
+  navigator.geolocation.getCurrentPosition(
+    async (position) => {
+      clearTimeout(geoTimeout);
+      const lat = position.coords.latitude;
+      const lng = position.coords.longitude;
+      const nearby = await searchNearbyRestaurants(lat, lng);
+      if (nearby.length > 0) {
+        pickFromRestaurants(nearby);
+      } else {
+        toast('附近沒有找到餐廳，從已儲存的餐廳抽選', 'warn');
         pickFromSavedRestaurants();
       }
-    );
-  } else {
-    pickFromSavedRestaurants();
-  }
+    },
+    (err) => {
+      clearTimeout(geoTimeout);
+      let msg = '定位失敗';
+      if (err.code === 1) msg = '定位權限被拒絕';
+      else if (err.code === 2) msg = '無法取得位置資訊';
+      else if (err.code === 3) msg = '定位超時';
+      toast(`${msg}，從已儲存的餐廳抽選`, 'warn');
+      pickFromSavedRestaurants();
+    },
+    { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 }
+  );
 }
 
 function searchNearbyRestaurants(lat, lng) {
   return new Promise((resolve) => {
+    // Check cache first
+    try {
+      const cached = JSON.parse(localStorage.getItem(NEARBY_CACHE_KEY) || 'null');
+      if (cached && Date.now() - cached.ts < NEARBY_CACHE_TTL) {
+        const dx = Math.abs(cached.lat - lat);
+        const dy = Math.abs(cached.lng - lng);
+        if (dx < 0.01 && dy < 0.01) {
+          resolve(cached.data);
+          return;
+        }
+      }
+    } catch(e) {}
+
     const f = getFilters();
     const service = new google.maps.places.PlacesService(document.createElement('div'));
     service.nearbySearch({
       location: { lat, lng },
-      radius: f.distance, // use filter distance
+      radius: f.distance,
       type: 'restaurant',
       language: 'zh-TW'
     }, (results, status) => {
       if (status === google.maps.places.PlacesServiceStatus.OK && results) {
         const mapped = results.map(p => {
-          // Check if this place is already in our data
           const existing = Object.values(data.restaurants).find(r =>
             r.placeId === p.place_id || r.name === p.name
           );
@@ -512,6 +633,10 @@ function searchNearbyRestaurants(lat, lng) {
             isNew: true
           };
         });
+        // Save to cache
+        try {
+          localStorage.setItem(NEARBY_CACHE_KEY, JSON.stringify({ ts: Date.now(), lat, lng, data: mapped }));
+        } catch(e) {}
         resolve(mapped);
       } else {
         resolve([]);
@@ -711,9 +836,9 @@ function showRandomResult(r) {
 
   let html = `<div style="text-align:center;padding:20px;">`;
 
-  // Photo if available
+  // Photo if available (lazy loaded)
   if (r.photoUrl) {
-    html += `<img src="${r.photoUrl}" style="width:100%;height:180px;object-fit:cover;border-radius:16px;margin-bottom:12px;" alt="${escapeHtml(r.name)}">`;
+    html += `<img src="${r.photoUrl}" loading="lazy" style="width:100%;height:180px;object-fit:cover;border-radius:16px;margin-bottom:12px;background:#f0f0f0;" alt="${escapeHtml(r.name)}">`;
   } else {
     html += `<div style="font-size:3rem;margin-bottom:10px;">🎉</div>`;
   }
@@ -836,6 +961,8 @@ function load() {
     try { data = JSON.parse(raw); } catch(e) {}
   }
   if (Object.keys(data.restaurants).length === 0) loadDemo();
+  _isLoading = false;
+  updateOnlineStatus();
   render();
 }
 
@@ -867,6 +994,11 @@ function setRestaurantFilter(mode) {
 
 function renderRestaurants(query) {
   const list = document.getElementById('restaurantList');
+
+  if (_isLoading) {
+    list.innerHTML = skeletonCard(4);
+    return;
+  }
 
   // 餐廳整體評分用 myRating（你對這家店的整體印象），未填回傳 -1
   const getAvg = (r) => r.myRating ?? -1;
@@ -916,7 +1048,15 @@ function renderRestaurants(query) {
   </div>`;
 
   if (restaurants.length === 0) {
-    list.innerHTML = filterBar + `<div class="empty-state"><div class="icon">🍽️</div><p>${Object.keys(data.restaurants).length === 0 ? '還沒有餐廳紀錄' : '沒有符合條件的餐廳'}</p></div>`;
+    const isEmptyData = Object.keys(data.restaurants).length === 0;
+    const isSearchEmpty = !isEmptyData && !!query;
+    list.innerHTML = filterBar + `
+      <div class="empty-state">
+        <div class="icon">🍽️</div>
+        <p>${isEmptyData ? '還沒有餐廳紀錄' : isSearchEmpty ? `沒有找到「${escapeHtml(query)}」相關的餐廳` : '沒有符合條件的餐廳'}</p>
+        ${isSearchEmpty ? '<button class="action-btn" onclick="document.getElementById(\'searchInput\').value=\'\';render();">清除搜尋</button>' : ''}
+        ${isEmptyData ? '<button class="action-btn" onclick="openModal()">＋ 新增第一筆評價</button>' : ''}
+      </div>`;
     return;
   }
 
@@ -980,6 +1120,12 @@ function setDishFilter(mode) {
 
 function renderDishes(query) {
   const list = document.getElementById('dishList');
+
+  if (_isLoading) {
+    list.innerHTML = skeletonCard(4);
+    return;
+  }
+
   let dishes = Object.values(data.dishes);
   if (query) dishes = dishes.filter(d => d.name.toLowerCase().includes(query));
 
@@ -1016,7 +1162,13 @@ function renderDishes(query) {
   </div>`;
 
   if (dishes.length === 0) {
-    list.innerHTML = filterBar + '<div class="empty-state"><div class="icon">🍖</div><p>沒有符合條件的菜品</p></div>';
+    const isSearchEmpty = Object.keys(data.dishes).length > 0 && !!query;
+    list.innerHTML = filterBar + `
+      <div class="empty-state">
+        <div class="icon">🍖</div>
+        <p>${isSearchEmpty ? `沒有找到「${escapeHtml(query)}」相關的菜品` : '沒有符合條件的菜品'}</p>
+        ${isSearchEmpty ? '<button class="action-btn" onclick="document.getElementById(\'searchInput\').value=\'\';render();">清除搜尋</button>' : ''}
+      </div>`;
     return;
   }
 
@@ -1056,38 +1208,71 @@ function renderDishes(query) {
 
 function renderMapTab() {
   const list = document.getElementById('mapRestaurantList');
+  const mapEl = document.getElementById('map');
   const restaurants = Object.values(data.restaurants).filter(r => r.lat && r.lng);
 
-  // Clear old markers to prevent memory leak
-  _googleMarkers.forEach(m => m.setMap(null));
-  _googleMarkers = [];
+  if (_isLoading) {
+    list.innerHTML = skeletonCard(3);
+    return;
+  }
 
-  // Try to init Google Map if API key is set
+  // Lazy map init: only create when map tab is visible and API is ready
   if (typeof google !== 'undefined' && google.maps && restaurants.length > 0) {
-    try {
-      const mapEl = document.getElementById('map');
-      if (!_googleMap) {
-        _googleMap = new google.maps.Map(mapEl, {
-          center: { lat: restaurants[0].lat, lng: restaurants[0].lng },
-          zoom: 13,
+    requestAnimationFrame(() => {
+      try {
+        if (!_googleMap) {
+          _googleMap = new google.maps.Map(mapEl, {
+            center: { lat: restaurants[0].lat, lng: restaurants[0].lng },
+            zoom: 13,
+            mapTypeControl: false,
+            fullscreenControl: false,
+          });
+        }
+
+        // Clear old markers
+        _googleMarkers.forEach(m => m.setMap(null));
+        _googleMarkers = [];
+
+        const bounds = new google.maps.LatLngBounds();
+        restaurants.forEach(r => {
+          const reviews = data.reviews.filter(v => v.restaurantId === r.id);
+          const avg = reviews.length > 0 ? reviews.reduce((s,v) => s+v.rating,0)/reviews.length : 0;
+          const marker = new google.maps.Marker({
+            position: { lat: r.lat, lng: r.lng },
+            map: _googleMap,
+            title: r.name,
+            icon: avg >= 4
+              ? 'https://maps.google.com/mapfiles/ms/icons/green-dot.png'
+              : avg >= 3
+                ? 'https://maps.google.com/mapfiles/ms/icons/yellow-dot.png'
+                : 'https://maps.google.com/mapfiles/ms/icons/red-dot.png'
+          });
+          _googleMarkers.push(marker);
+          bounds.extend({ lat: r.lat, lng: r.lng });
         });
+
+        if (restaurants.length > 1) {
+          _googleMap.fitBounds(bounds, { top: 20, right: 20, bottom: 20, left: 20 });
+        }
+      } catch(e) {
+        console.warn('Map render error:', e);
       }
-      restaurants.forEach(r => {
-        const reviews = data.reviews.filter(v => v.restaurantId === r.id);
-        const avg = reviews.length > 0 ? reviews.reduce((s,v) => s+v.rating,0)/reviews.length : 0;
-        const marker = new google.maps.Marker({
-          position: { lat: r.lat, lng: r.lng },
-          map: _googleMap,
-          title: r.name,
-          icon: avg >= 4
-            ? 'https://maps.google.com/mapfiles/ms/icons/green-dot.png'
-            : avg >= 3
-              ? 'https://maps.google.com/mapfiles/ms/icons/yellow-dot.png'
-              : 'https://maps.google.com/mapfiles/ms/icons/red-dot.png'
-        });
-        _googleMarkers.push(marker);
-      });
-    } catch(e) {}
+    });
+  } else if (restaurants.length === 0) {
+    mapEl.innerHTML = `
+      <div class="map-fallback">
+        <div class="icon" style="font-size:3rem;">🗺️</div>
+        <p>還沒有帶座標的餐廳</p>
+        <p style="font-size:0.8rem;margin-top:4px;">新增評價時選擇真實餐廳，地圖就會自動顯示</p>
+      </div>`;
+  } else if (_mapsLoadFailed) {
+    mapEl.innerHTML = `
+      <div class="map-fallback">
+        <div class="icon" style="font-size:3rem;">⚠️</div>
+        <p>地圖載入失敗</p>
+        <p style="font-size:0.8rem;margin-top:4px;">請檢查 API Key 是否正確，或稍後再試</p>
+        <button onclick="openFoodSettings()" style="margin-top:12px;padding:8px 18px;background:var(--accent);color:white;border:none;border-radius:10px;cursor:pointer;font-weight:600;font-size:0.85rem;">⚙️ 設定 API Key</button>
+      </div>`;
   }
 
   list.innerHTML = restaurants.map(r => {
@@ -1104,11 +1289,17 @@ function renderMapTab() {
         <a href="https://www.google.com/maps/dir/?api=1&destination=${r.lat},${r.lng}" target="_blank" class="navigate-btn">🧭 導航去這裡</a>
       </div>
     `;
-  }).join('') || '<div class="empty-state"><p>沒有帶座標的餐廳</p></div>';
+  }).join('') || '<div class="empty-state"><div class="icon">🗺️</div><p>沒有帶座標的餐廳</p><button class="action-btn" onclick="openModal()">＋ 新增帶地址的餐廳</button></div>';
 }
 
 function renderRecommend() {
   const list = document.getElementById('recommendList');
+
+  if (_isLoading) {
+    list.innerHTML = skeletonCard(3);
+    return;
+  }
+
   const html = [];
 
   // 1. Pattern: dishes often eaten together
@@ -1490,19 +1681,27 @@ function deleteReview(reviewId) {
 }
 
 // ===== Google Maps 動態載入 =====
-function getMapsKey() { return localStorage.getItem('foodMap_mapsKey') ?? 'AIzaSyAu3A1Ax8q9m8t9zGbtWkFDeIrxrtzYhLs'; }
+function getMapsKey() { return localStorage.getItem('foodMap_mapsKey') || ''; }
 
 function loadMapsApi() {
   const key = getMapsKey();
-  if (!key || window._mapsLoading || typeof google !== 'undefined') return;
+  if (!key) return; // Gracefully skip if no key set
+  if (window._mapsLoading || typeof google !== 'undefined') return;
   window._mapsLoading = true;
   const script = document.createElement('script');
   script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&libraries=places&callback=onMapsApiLoaded`;
+  script.onerror = () => {
+    window._mapsLoading = false;
+    _mapsLoadFailed = true;
+    console.warn('Google Maps API failed to load');
+    if (currentTab === 'map') renderMapTab();
+  };
   document.head.appendChild(script);
 }
 
 window.onMapsApiLoaded = function() {
   window._mapsLoading = false;
+  _mapsLoadFailed = false;
   toast('🗺️ 地圖功能已啟用！', 'success');
   if (currentTab === 'map') renderMapTab();
 };
