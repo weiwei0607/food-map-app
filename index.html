@@ -1681,7 +1681,9 @@ function deleteReview(reviewId) {
 }
 
 // ===== Google Maps 動態載入 =====
-function getMapsKey() { return localStorage.getItem('foodMap_mapsKey') || ''; }
+// 預設 key（個人使用；請在 Google Cloud Console 設定 HTTP 參照網址限制只允許本網域）
+const DEFAULT_MAPS_KEY = 'AIzaSyAu3A1Ax8q9m8t9zGbtWkFDeIrxrtzYhLs';
+function getMapsKey() { return localStorage.getItem('foodMap_mapsKey') || DEFAULT_MAPS_KEY; }
 
 function loadMapsApi() {
   const key = getMapsKey();
