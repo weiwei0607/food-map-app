@@ -294,6 +294,7 @@
 
 <header style="position:relative;">
   <button class="settings-btn" onclick="openFoodSettings()" title="設定 Google Maps API Key">⚙️</button>
+  <button id="authBtn" class="settings-btn" style="left:12px;right:auto;" onclick="handleAuthClick()" title="登入以雲端同步">👤</button>
   <h1>🍽️ 我的美食地圖</h1>
   <p>記錄每道菜在每間店的愛與恨，下次不再踩雷</p>
   <div class="stats-bar">
@@ -445,10 +446,113 @@
   </div>
 </div>
 
+<!-- Firebase (compat SDK，適合單檔非模組腳本) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+
 <script>
 // ===== 資料模型 =====
 const STORAGE_KEY = 'foodMap_v2';
 let data = { restaurants: {}, dishes: {}, reviews: [] };
+
+// ===== Firebase 雲端同步（各自帳號各自資料）=====
+const firebaseConfig = {
+  apiKey: "AIzaSyDi3E5jHjanuw-4huooIiJ5SqhWmdm2EP0",
+  authDomain: "b-battle-580b5.firebaseapp.com",
+  projectId: "b-battle-580b5",
+  storageBucket: "b-battle-580b5.firebasestorage.app",
+  messagingSenderId: "912827003016",
+  appId: "1:912827003016:web:febd90b0c5fc0484dcaf3d",
+};
+let _fbReady = false, _auth = null, _fs = null, _user = null, _cloudSaveTimer = null;
+
+function initFirebase() {
+  try {
+    firebase.initializeApp(firebaseConfig);
+    _auth = firebase.auth();
+    _fs = firebase.firestore();
+    _fbReady = true;
+    _auth.onAuthStateChanged(onAuthChanged);
+  } catch (e) {
+    console.warn('Firebase init 失敗，將以本機模式運作', e);
+  }
+}
+
+function handleAuthClick() {
+  if (!_fbReady) { toast('雲端同步暫時無法使用，資料仍存在本機', 'warn'); return; }
+  if (_user) {
+    if (confirm(`目前登入：${_user.displayName || _user.email}\n要登出嗎？（本機資料會保留）`)) {
+      _auth.signOut();
+    }
+  } else {
+    const provider = new firebase.auth.GoogleAuthProvider();
+    _auth.signInWithPopup(provider).catch(err => {
+      console.error(err);
+      if (err.code === 'auth/unauthorized-domain') {
+        toast('此網域尚未授權登入，請聯絡管理員', 'error');
+      } else if (err.code !== 'auth/popup-closed-by-user') {
+        toast('登入失敗：' + (err.message || err.code), 'error');
+      }
+    });
+  }
+}
+
+async function onAuthChanged(user) {
+  _user = user;
+  updateAuthUI();
+  if (user) {
+    await loadFromCloud(user.uid);
+  }
+}
+
+function updateAuthUI() {
+  const btn = document.getElementById('authBtn');
+  if (!btn) return;
+  if (_user) {
+    btn.textContent = '☁️';
+    btn.title = `已登入：${_user.displayName || _user.email}（點擊登出）`;
+  } else {
+    btn.textContent = '👤';
+    btn.title = '登入以雲端同步';
+  }
+}
+
+async function loadFromCloud(uid) {
+  try {
+    const doc = await _fs.collection('foodmap').doc(uid).get();
+    if (doc.exists && doc.data().payload) {
+      data = JSON.parse(doc.data().payload);
+      toast('已從雲端載入你的美食地圖 ☁️', 'success');
+    } else {
+      // 首次登入：把本機現有資料上傳，當作這個帳號的起點
+      await saveToCloud(uid);
+      toast('已建立雲端帳號，資料開始同步 ☁️', 'success');
+    }
+    _isLoading = false;
+    render();
+  } catch (e) {
+    console.warn('雲端載入失敗，使用本機資料', e);
+  }
+}
+
+async function saveToCloud(uid) {
+  try {
+    await _fs.collection('foodmap').doc(uid).set({
+      payload: JSON.stringify(data),
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    });
+  } catch (e) {
+    console.warn('雲端儲存失敗（已存本機）', e);
+  }
+}
+
+// save() 觸發的雲端同步（debounce 1.2s，避免頻繁寫入）
+function syncCloudDebounced() {
+  if (!_user || !_fbReady) return;
+  clearTimeout(_cloudSaveTimer);
+  _cloudSaveTimer = setTimeout(() => saveToCloud(_user.uid), 1200);
+}
 let currentTab = 'restaurants';
 let restaurantFilterMode = 'all';
 let dishFilterMode = 'all';
@@ -968,6 +1072,7 @@ function load() {
 
 function save() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  syncCloudDebounced();
 }
 
 // ===== 渲染 =====
@@ -1735,6 +1840,7 @@ function saveFoodSettings() {
 // ===== Init =====
 loadMapsApi();
 load();
+initFirebase();
 </script>
 
 </body>
